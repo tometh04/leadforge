@@ -9,82 +9,24 @@ const PUBLIC_PREFIXES = [
   '/favicon.ico',
 ]
 
-// Verifica token HMAC-SHA256 — solo Web Crypto API, compatible con Edge Runtime
-async function isValidToken(token: string, secret: string): Promise<boolean> {
-  try {
-    if (!token || !secret) return false
+export function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl
 
-    // Token formato: "payloadB64.signatureHex"
-    const dotIdx = token.lastIndexOf('.')
-    if (dotIdx === -1) return false
-
-    const payloadB64 = token.slice(0, dotIdx)
-    const signatureHex = token.slice(dotIdx + 1)
-    if (!payloadB64 || !signatureHex) return false
-
-    // Decodificar payload y verificar expiración (7 días)
-    const payload = atob(payloadB64)                   // "email:timestamp"
-    const colonIdx = payload.lastIndexOf(':')
-    if (colonIdx === -1) return false
-    const tsStr = payload.slice(colonIdx + 1)
-    const ts = parseInt(tsStr, 10)
-    if (isNaN(ts)) return false
-    const sevenDays = 7 * 24 * 60 * 60 * 1000
-    if (Date.now() - ts > sevenDays) return false
-
-    // Importar clave HMAC
-    const keyData = new TextEncoder().encode(secret)
-    const cryptoKey = await crypto.subtle.importKey(
-      'raw',
-      keyData,
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['verify']
-    )
-
-    // Convertir signatureHex → Uint8Array
-    const hexPairs = signatureHex.match(/.{1,2}/g)
-    if (!hexPairs) return false
-    const signatureBytes = new Uint8Array(hexPairs.map((b) => parseInt(b, 16)))
-
-    // Verificar HMAC contra el payload
-    return await crypto.subtle.verify(
-      'HMAC',
-      cryptoKey,
-      signatureBytes,
-      new TextEncoder().encode(payloadB64)
-    )
-  } catch {
-    return false
-  }
-}
-
-export async function middleware(req: NextRequest) {
-  try {
-    const { pathname } = req.nextUrl
-
-    // Pasar rutas públicas sin verificar
-    if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
-      return NextResponse.next()
-    }
-
-    // Obtener cookie de sesión y secret
-    const sessionToken = req.cookies.get('leadforge_session')?.value ?? ''
-    const secret = process.env.SESSION_SECRET ?? ''
-
-    // Si no hay secret configurado o token inválido → redirigir al login
-    if (!secret || !sessionToken || !(await isValidToken(sessionToken, secret))) {
-      const loginUrl = new URL('/login', req.url)
-      loginUrl.searchParams.set('from', pathname)
-      return NextResponse.redirect(loginUrl)
-    }
-
+  // Pasar rutas públicas sin verificar
+  if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
     return NextResponse.next()
-  } catch {
-    // Si el middleware falla por cualquier razón → redirigir al login (nunca 500)
+  }
+
+  // Verificar existencia de la cookie — validación HMAC se hace en el server
+  const sessionToken = req.cookies.get('leadforge_session')?.value
+
+  if (!sessionToken) {
     const loginUrl = new URL('/login', req.url)
+    loginUrl.searchParams.set('from', pathname)
     return NextResponse.redirect(loginUrl)
   }
+
+  return NextResponse.next()
 }
 
 export const config = {
