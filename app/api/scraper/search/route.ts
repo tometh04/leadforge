@@ -70,12 +70,25 @@ export async function POST(req: NextRequest) {
     const discarded = resultsWithFlags.filter((r) => !r.viable && !r.already_imported)
     const finalResults = [...viable, ...discarded].slice(0, maxResults + discarded.length)
 
+    const newCount = viable.filter((r) => !r.already_imported).length
+
+    // Loguear búsqueda en historial
+    await supabase.from('scraper_searches').insert({
+      niche: niche.trim(),
+      city: city.trim(),
+      max_results: maxResults,
+      total_found: finalResults.length,
+      new_found: newCount,
+      viable: viable.length,
+      discarded: discarded.length,
+    })
+
     return NextResponse.json({
       results: finalResults,
       total: finalResults.length,
       viable: viable.length,
       discarded: discarded.length,
-      new: viable.filter((r) => !r.already_imported).length,
+      new: newCount,
     })
   } catch (error) {
     console.error('[scraper/search]', error)

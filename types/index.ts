@@ -63,6 +63,18 @@ export interface LeadActivity {
   detail: string | null
 }
 
+export interface ScraperSearch {
+  id: string
+  created_at: string
+  niche: string
+  city: string
+  max_results: number
+  total_found: number
+  new_found: number
+  viable: number
+  discarded: number
+}
+
 export interface ScraperResult {
   place_id: string
   business_name: string

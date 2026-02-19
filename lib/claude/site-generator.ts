@@ -154,22 +154,16 @@ HTML DE REFERENCIA — Este es un ejemplo de la CALIDAD y ESTRUCTURA que espero.
 ${SITE_REFERENCE_HTML}
 </reference>
 
-Generá el HTML completo ahora. Sin explicaciones, sin markdown, sin bloques de código.`
+Generá el HTML completo ahora. Sin explicaciones, sin markdown, sin bloques de código. Empezá directamente con <!DOCTYPE html>.`
 
   const stream = anthropic.messages.stream({
     model: 'claude-sonnet-4-6',
     max_tokens: 24000,
-    messages: [
-      { role: 'user', content: prompt },
-      { role: 'assistant', content: '<!DOCTYPE html>' },
-    ],
+    messages: [{ role: 'user', content: prompt }],
   })
 
   const message = await stream.finalMessage()
-  const rawText = message.content[0].type === 'text' ? message.content[0].text : ''
-
-  // The assistant prefill was "<!DOCTYPE html>", so prepend it to the response
-  const text = `<!DOCTYPE html>${rawText}`
+  const text = message.content[0].type === 'text' ? message.content[0].text : ''
 
   // Extraer el HTML de la respuesta
   const htmlMatch = text.match(/<!DOCTYPE\s+html[\s\S]*<\/html>/i)

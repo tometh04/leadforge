@@ -1,7 +1,16 @@
 'use client'
 
-import { useState } from 'react'
-import { Search, Import, ExternalLink, Star, CheckCircle2, AlertCircle } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import {
+  Search,
+  Import,
+  ExternalLink,
+  Star,
+  CheckCircle2,
+  AlertCircle,
+  History,
+  RotateCcw,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,8 +26,15 @@ import {
 } from '@/components/ui/table'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ScraperResult } from '@/types'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ScraperResult, ScraperSearch } from '@/types'
 
 const NICHES = [
   'Restaurantes',
@@ -49,6 +65,27 @@ export default function ScraperPage() {
   const [results, setResults] = useState<ScraperResult[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [searched, setSearched] = useState(false)
+  const [activeTab, setActiveTab] = useState('buscar')
+  const [history, setHistory] = useState<ScraperSearch[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(false)
+
+  const fetchHistory = useCallback(async () => {
+    setLoadingHistory(true)
+    try {
+      const res = await fetch('/api/scraper/history')
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setHistory(data)
+    } catch {
+      toast.error('Error al cargar el historial')
+    } finally {
+      setLoadingHistory(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchHistory()
+  }, [fetchHistory])
 
   const handleSearch = async () => {
     if (!niche.trim() || !city.trim()) {
@@ -77,11 +114,25 @@ export default function ScraperPage() {
       } else {
         toast.success(`${data.total} leads encontrados — ${data.new} nuevos`)
       }
+
+      // Refrescar historial después de una búsqueda exitosa
+      fetchHistory()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error al buscar')
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleReSearch = (search: ScraperSearch) => {
+    setNiche(search.niche)
+    setCity(search.city)
+    setMaxResults(search.max_results)
+    setActiveTab('buscar')
+    // Ejecutar la búsqueda después de cambiar de tab
+    setTimeout(() => {
+      document.getElementById('search-btn')?.click()
+    }, 100)
   }
 
   const handleImport = async () => {
@@ -101,7 +152,7 @@ export default function ScraperPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
-      toast.success(`✅ ${data.imported} leads importados al CRM`)
+      toast.success(`${data.imported} leads importados al CRM`)
 
       // Marcar como importados en la UI
       setResults((prev) =>
@@ -145,224 +196,307 @@ export default function ScraperPage() {
         </p>
       </div>
 
-      {/* Formulario de búsqueda */}
-      <Card className="mb-8">
-        <CardHeader>
-          <CardTitle className="text-base">Nueva búsqueda</CardTitle>
-          <CardDescription>
-            Usamos Google Places para encontrar negocios con presencia web.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-            <div className="flex-1 space-y-1.5">
-              <Label htmlFor="niche">Nicho</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="niche"
-                  placeholder="ej. Dentistas, Gimnasios..."
-                  value={niche}
-                  onChange={(e) => setNiche(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                />
-                <Select onValueChange={(v) => setNiche(v)}>
-                  <SelectTrigger className="w-36 shrink-0">
-                    <SelectValue placeholder="Predefinidos" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {NICHES.map((n) => (
-                      <SelectItem key={n} value={n}>
-                        {n}
-                      </SelectItem>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="mb-6">
+          <TabsTrigger value="buscar" className="gap-1.5">
+            <Search className="h-4 w-4" />
+            Buscar
+          </TabsTrigger>
+          <TabsTrigger value="historial" className="gap-1.5">
+            <History className="h-4 w-4" />
+            Historial
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="buscar">
+          {/* Formulario de búsqueda */}
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle className="text-base">Nueva búsqueda</CardTitle>
+              <CardDescription>
+                Usamos Google Places para encontrar negocios con presencia web.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+                <div className="flex-1 space-y-1.5">
+                  <Label htmlFor="niche">Nicho</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id="niche"
+                      placeholder="ej. Dentistas, Gimnasios..."
+                      value={niche}
+                      onChange={(e) => setNiche(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                    />
+                    <Select onValueChange={(v) => setNiche(v)}>
+                      <SelectTrigger className="w-36 shrink-0">
+                        <SelectValue placeholder="Predefinidos" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {NICHES.map((n) => (
+                          <SelectItem key={n} value={n}>
+                            {n}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="flex-1 space-y-1.5">
+                  <Label htmlFor="city">Ciudad / Zona</Label>
+                  <Input
+                    id="city"
+                    placeholder="ej. Palermo, Buenos Aires..."
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                  />
+                </div>
+
+                <div className="w-32 space-y-1.5">
+                  <Label>Máx. resultados</Label>
+                  <Select
+                    value={String(maxResults)}
+                    onValueChange={(v) => setMaxResults(Number(v))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MAX_RESULTS_OPTIONS.map((n) => (
+                        <SelectItem key={n} value={String(n)}>
+                          {n}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <Button
+                  id="search-btn"
+                  onClick={handleSearch}
+                  disabled={loading}
+                  className="h-10 gap-2"
+                >
+                  <Search className="h-4 w-4" />
+                  {loading ? 'Buscando...' : 'Buscar leads'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Resultados */}
+          {loading && <LoadingSkeleton />}
+
+          {!loading && searched && results.length === 0 && (
+            <div className="rounded-lg border border-dashed p-12 text-center">
+              <AlertCircle className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
+              <p className="font-medium">Sin resultados</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                No se encontraron negocios con teléfono y sitio web en esa búsqueda. Probá con otro
+                nicho o ciudad.
+              </p>
+            </div>
+          )}
+
+          {!loading && results.length > 0 && (
+            <div>
+              {/* Acciones de la tabla */}
+              <div className="mb-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-muted-foreground">
+                    {results.length} resultados —{' '}
+                    <span className="font-medium text-foreground">{selectableCount} nuevos</span>
+                  </span>
+                  {selected.size > 0 && (
+                    <Badge variant="secondary">{selected.size} seleccionados</Badge>
+                  )}
+                </div>
+                <Button
+                  onClick={handleImport}
+                  disabled={importing || selected.size === 0}
+                  className="gap-2"
+                >
+                  <Import className="h-4 w-4" />
+                  {importing
+                    ? 'Importando...'
+                    : `Importar ${selected.size > 0 ? selected.size : ''} al CRM`}
+                </Button>
+              </div>
+
+              <div className="rounded-lg border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10">
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          onChange={toggleAll}
+                          className="h-4 w-4 cursor-pointer rounded border-border"
+                          title="Seleccionar todos los nuevos"
+                        />
+                      </TableHead>
+                      <TableHead>Negocio</TableHead>
+                      <TableHead>Categoría</TableHead>
+                      <TableHead>Teléfono</TableHead>
+                      <TableHead>Website</TableHead>
+                      <TableHead className="text-center">Rating</TableHead>
+                      <TableHead className="text-center">Estado</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {results.map((lead) => (
+                      <TableRow
+                        key={lead.place_id}
+                        className={lead.already_imported ? 'opacity-50' : 'cursor-pointer'}
+                        onClick={() => !lead.already_imported && toggleSelect(lead.place_id)}
+                      >
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={selected.has(lead.place_id)}
+                            onChange={() =>
+                              !lead.already_imported && toggleSelect(lead.place_id)
+                            }
+                            disabled={lead.already_imported}
+                            className="h-4 w-4 cursor-pointer rounded border-border disabled:cursor-not-allowed"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-3">
+                            {lead.google_photo_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={lead.google_photo_url}
+                                alt={lead.business_name}
+                                className="h-8 w-8 rounded-md object-cover"
+                              />
+                            ) : (
+                              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">
+                                {lead.business_name.charAt(0)}
+                              </div>
+                            )}
+                            <div>
+                              <p className="font-medium leading-tight">{lead.business_name}</p>
+                              <p className="text-xs text-muted-foreground">{lead.address}</p>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-xs">
+                            {lead.category}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm">{lead.phone}</TableCell>
+                        <TableCell>
+                          <a
+                            href={lead.website}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            className="flex items-center gap-1 text-sm text-primary hover:underline"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            {new URL(lead.website).hostname.replace('www.', '')}
+                          </a>
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {lead.rating ? (
+                            <span className="flex items-center justify-center gap-1 text-sm">
+                              <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                              {lead.rating}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          {lead.already_imported ? (
+                            <Badge variant="secondary" className="gap-1 text-xs">
+                              <CheckCircle2 className="h-3 w-3" />
+                              En CRM
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-xs">
+                              Nuevo
+                            </Badge>
+                          )}
+                        </TableCell>
+                      </TableRow>
                     ))}
-                  </SelectContent>
-                </Select>
+                  </TableBody>
+                </Table>
               </div>
             </div>
+          )}
+        </TabsContent>
 
-            <div className="flex-1 space-y-1.5">
-              <Label htmlFor="city">Ciudad / Zona</Label>
-              <Input
-                id="city"
-                placeholder="ej. Palermo, Buenos Aires..."
-                value={city}
-                onChange={(e) => setCity(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              />
+        <TabsContent value="historial">
+          {loadingHistory && <LoadingSkeleton />}
+
+          {!loadingHistory && history.length === 0 && (
+            <div className="rounded-lg border border-dashed p-12 text-center">
+              <History className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
+              <p className="font-medium">Sin búsquedas previas</p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Las búsquedas que realices aparecerán acá.
+              </p>
             </div>
+          )}
 
-            <div className="w-32 space-y-1.5">
-              <Label>Máx. resultados</Label>
-              <Select
-                value={String(maxResults)}
-                onValueChange={(v) => setMaxResults(Number(v))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {MAX_RESULTS_OPTIONS.map((n) => (
-                    <SelectItem key={n} value={String(n)}>
-                      {n}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <Button onClick={handleSearch} disabled={loading} className="h-10 gap-2">
-              <Search className="h-4 w-4" />
-              {loading ? 'Buscando...' : 'Buscar leads'}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Resultados */}
-      {loading && <LoadingSkeleton />}
-
-      {!loading && searched && results.length === 0 && (
-        <div className="rounded-lg border border-dashed p-12 text-center">
-          <AlertCircle className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-          <p className="font-medium">Sin resultados</p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            No se encontraron negocios con teléfono y sitio web en esa búsqueda. Probá con otro
-            nicho o ciudad.
-          </p>
-        </div>
-      )}
-
-      {!loading && results.length > 0 && (
-        <div>
-          {/* Acciones de la tabla */}
-          <div className="mb-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-muted-foreground">
-                {results.length} resultados —{' '}
-                <span className="font-medium text-foreground">
-                  {selectableCount} nuevos
-                </span>
-              </span>
-              {selected.size > 0 && (
-                <Badge variant="secondary">{selected.size} seleccionados</Badge>
-              )}
-            </div>
-            <Button
-              onClick={handleImport}
-              disabled={importing || selected.size === 0}
-              className="gap-2"
-            >
-              <Import className="h-4 w-4" />
-              {importing
-                ? 'Importando...'
-                : `Importar ${selected.size > 0 ? selected.size : ''} al CRM`}
-            </Button>
-          </div>
-
-          <div className="rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-10">
-                    <input
-                      type="checkbox"
-                      checked={allSelected}
-                      onChange={toggleAll}
-                      className="h-4 w-4 cursor-pointer rounded border-border"
-                      title="Seleccionar todos los nuevos"
-                    />
-                  </TableHead>
-                  <TableHead>Negocio</TableHead>
-                  <TableHead>Categoría</TableHead>
-                  <TableHead>Teléfono</TableHead>
-                  <TableHead>Website</TableHead>
-                  <TableHead className="text-center">Rating</TableHead>
-                  <TableHead className="text-center">Estado</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {results.map((lead) => (
-                  <TableRow
-                    key={lead.place_id}
-                    className={lead.already_imported ? 'opacity-50' : 'cursor-pointer'}
-                    onClick={() => !lead.already_imported && toggleSelect(lead.place_id)}
-                  >
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(lead.place_id)}
-                        onChange={() => !lead.already_imported && toggleSelect(lead.place_id)}
-                        disabled={lead.already_imported}
-                        className="h-4 w-4 cursor-pointer rounded border-border disabled:cursor-not-allowed"
-                      />
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-3">
-                        {lead.google_photo_url ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={lead.google_photo_url}
-                            alt={lead.business_name}
-                            className="h-8 w-8 rounded-md object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-muted text-xs font-bold text-muted-foreground">
-                            {lead.business_name.charAt(0)}
-                          </div>
-                        )}
-                        <div>
-                          <p className="font-medium leading-tight">{lead.business_name}</p>
-                          <p className="text-xs text-muted-foreground">{lead.address}</p>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="text-xs">
-                        {lead.category}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-sm">{lead.phone}</TableCell>
-                    <TableCell>
-                      <a
-                        href={lead.website}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="flex items-center gap-1 text-sm text-primary hover:underline"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                        {new URL(lead.website).hostname.replace('www.', '')}
-                      </a>
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {lead.rating ? (
-                        <span className="flex items-center justify-center gap-1 text-sm">
-                          <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-                          {lead.rating}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-center">
-                      {lead.already_imported ? (
-                        <Badge variant="secondary" className="gap-1 text-xs">
-                          <CheckCircle2 className="h-3 w-3" />
-                          En CRM
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-xs">
-                          Nuevo
-                        </Badge>
-                      )}
-                    </TableCell>
+          {!loadingHistory && history.length > 0 && (
+            <div className="rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead>Nicho</TableHead>
+                    <TableHead>Ciudad</TableHead>
+                    <TableHead className="text-center">Encontrados</TableHead>
+                    <TableHead className="text-center">Nuevos</TableHead>
+                    <TableHead className="text-center">Viables</TableHead>
+                    <TableHead className="text-right"></TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-      )}
+                </TableHeader>
+                <TableBody>
+                  {history.map((search) => (
+                    <TableRow key={search.id}>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {new Date(search.created_at).toLocaleDateString('es-AR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          year: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </TableCell>
+                      <TableCell className="font-medium">{search.niche}</TableCell>
+                      <TableCell>{search.city}</TableCell>
+                      <TableCell className="text-center">{search.total_found}</TableCell>
+                      <TableCell className="text-center">{search.new_found}</TableCell>
+                      <TableCell className="text-center">{search.viable}</TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1.5"
+                          onClick={() => handleReSearch(search)}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          Re-buscar
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }
