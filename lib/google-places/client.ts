@@ -1,24 +1,12 @@
 import { ScraperResult } from '@/types'
-import { readFileSync } from 'fs'
-import { join } from 'path'
-
-function readEnvKey(keyName: string): string {
-  if (process.env[keyName]) return process.env[keyName]!
-  try {
-    const content = readFileSync(join(process.cwd(), '.env.local'), 'utf8')
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed.includes('=') || trimmed.startsWith('#')) continue
-      const eqIdx = trimmed.indexOf('=')
-      const k = trimmed.slice(0, eqIdx).trim()
-      const v = trimmed.slice(eqIdx + 1).trim()
-      if (k === keyName && v) return v
-    }
-  } catch { /* ignorar */ }
-  throw new Error(`${keyName} no encontrada en el entorno`)
-}
 
 const PLACES_API_BASE = 'https://places.googleapis.com/v1'
+
+function getApiKey(): string {
+  const key = process.env.GOOGLE_PLACES_API_KEY
+  if (!key) throw new Error('GOOGLE_PLACES_API_KEY no configurada')
+  return key
+}
 
 interface PlacesTextSearchResponse {
   places?: PlaceResult[]
@@ -41,12 +29,12 @@ interface PlaceResult {
 export interface PlaceDetails {
   rating: number | null
   userRatingCount: number | null
-  openingHours: string[] | null // weekdayDescriptions array from Places API
+  openingHours: string[] | null
 }
 
 /** Obtiene detalles de un Place por su place_id: rating, reviews, horarios reales */
 export async function fetchPlaceDetails(placeId: string): Promise<PlaceDetails> {
-  const apiKey = readEnvKey('GOOGLE_PLACES_API_KEY')
+  const apiKey = getApiKey()
 
   const response = await fetch(`${PLACES_API_BASE}/places/${placeId}`, {
     headers: {
@@ -78,7 +66,7 @@ export async function searchPlaces(
   city: string,
   maxResults: number = 20
 ): Promise<ScraperResult[]> {
-  const apiKey = readEnvKey('GOOGLE_PLACES_API_KEY')
+  const apiKey = getApiKey()
 
   const query = `${niche} en ${city}`
   const results: ScraperResult[] = []
@@ -124,7 +112,6 @@ export async function searchPlaces(
     const data: PlacesTextSearchResponse = await response.json()
 
     for (const place of data.places ?? []) {
-      // Filtro obligatorio: tiene teléfono Y website
       if (!place.nationalPhoneNumber && !place.internationalPhoneNumber) continue
       if (!place.websiteUri) continue
 
