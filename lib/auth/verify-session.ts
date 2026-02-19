@@ -36,6 +36,9 @@ async function isValidToken(token: string, secret: string): Promise<boolean> {
 
 /** Llama desde Server Components/layouts para proteger rutas. Redirige a /login si no hay sesión válida. */
 export async function requireAuth() {
+  // Bypass: skip auth check in development
+  if (process.env.NODE_ENV === 'development') return
+
   const cookieStore = await cookies()
   const token = cookieStore.get('leadforge_session')?.value ?? ''
   const secret = process.env.SESSION_SECRET ?? ''

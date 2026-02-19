@@ -80,7 +80,9 @@ export async function POST(
       lead.category ?? lead.niche,
       lead.address ?? '',
       lead.phone ?? '',
-      scrapedData
+      scrapedData,
+      googleRating,
+      googleReviewCount
     )
 
     // 5. Construir el HTML

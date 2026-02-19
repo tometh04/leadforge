@@ -8,6 +8,10 @@ export interface SiteContent {
   secondary_color: string
   cta_text: string
   about_text: string
+  unique_selling_points: string[]
+  faq: { question: string; answer: string }[]
+  testimonial_style: string
+  quote_cta: string
   real_images: string[] // URLs de imágenes reales del negocio (fotos, no iconos)
   gallery_images: string[] // Fotos para la galería (excluye hero y about)
   logo_url: string | null
@@ -27,7 +31,9 @@ export async function generateSiteContent(
   category: string,
   address: string,
   phone: string,
-  scraped?: ScrapedBusinessData
+  scraped?: ScrapedBusinessData,
+  googleRating?: number | null,
+  googleReviewCount?: number | null
 ): Promise<SiteContent> {
   const anthropic = getAnthropicClient()
 
@@ -42,7 +48,13 @@ Datos reales extraídos del sitio web actual:
 - Tipo de web actual: ${scraped.siteType ?? 'desconocido'}
 - Redes sociales: ${scraped.socialLinks?.map(s => `${s.platform}: ${s.url}`).join(', ') || 'No detectadas'}
 
-IMPORTANTE: Usá el texto real del negocio para inferir sus servicios y propuesta de valor. No inventes cosas que no estén respaldadas por el texto real.
+IMPORTANTE: Usá SOLO el texto real del negocio para inferir servicios y propuesta de valor. NO inventes servicios que no estén respaldados por el texto real. Si no hay datos suficientes, usá solo el rubro como guía general.
+` : ''
+
+  const googleContext = googleRating || googleReviewCount ? `
+Datos de Google Maps:
+- Rating: ${googleRating ? googleRating.toFixed(1) + ' estrellas' : 'No disponible'}
+- Cantidad de reseñas: ${googleReviewCount ?? 'No disponible'}
 ` : ''
 
   const prompt = `Sos un experto en marketing y diseño web para negocios locales en Argentina.
@@ -52,27 +64,45 @@ Generá el contenido para el sitio web de este negocio:
 - Rubro: ${category}
 - Dirección: ${address}
 - Teléfono: ${phone}
-${realDataContext}
+${realDataContext}${googleContext}
+
+REGLAS IMPORTANTES:
+- NO inventes servicios — si no hay datos reales, usá solo el rubro como guía general y sé honesto.
+- Los USPs deben basarse en información real del negocio, no en frases genéricas.
+- El testimonio debe sonar como una reseña real de Google, sin inventar nombres (usá "Cliente verificado").
+- La frase de cierre (quote_cta) debe ser persuasiva y personalizada al negocio, no genérica.
+- Las FAQ deben ser preguntas que un cliente real haría sobre este tipo de negocio.
 
 Respondé ÚNICAMENTE con JSON válido, sin texto antes ni después:
 {
-  "tagline": "<eslogan corto y atractivo, máximo 8 palabras, basado en lo que realmente ofrece el negocio>",
+  "tagline": "<eslogan corto y atractivo, máximo 8 palabras, basado en lo que realmente ofrece>",
   "hero_description": "<descripción real del negocio en 2 oraciones, basada en el contenido real extraído>",
   "services": [
     { "name": "<servicio real 1 detectado>", "description": "<descripción breve basada en el texto real>" },
     { "name": "<servicio real 2>", "description": "<descripción breve>" },
-    { "name": "<servicio real 3>", "description": "<descripción breve>" },
-    { "name": "<servicio real 4>", "description": "<descripción breve>" }
+    { "name": "<servicio real 3>", "description": "<descripción breve>" }
   ],
   "primary_color": "<color hex principal, acorde al rubro y branding actual si lo detectaste>",
   "secondary_color": "<color hex secundario complementario>",
   "cta_text": "<texto del botón de llamada a la acción, acorde al rubro>",
-  "about_text": "<párrafo sobre el negocio, 3-4 oraciones, basado en información real extraída>"
+  "about_text": "<párrafo sobre el negocio, 3-4 oraciones, basado en información real extraída>",
+  "unique_selling_points": [
+    "<USP 1: diferencial concreto basado en el texto real, máx 10 palabras>",
+    "<USP 2: otro diferencial real>",
+    "<USP 3: otro diferencial real>"
+  ],
+  "faq": [
+    { "question": "<pregunta frecuente relevante al rubro>", "answer": "<respuesta útil y concisa, 2-3 oraciones>" },
+    { "question": "<otra pregunta>", "answer": "<respuesta>" },
+    { "question": "<otra pregunta>", "answer": "<respuesta>" }
+  ],
+  "testimonial_style": "<texto tipo reseña de Google realista, 2-3 oraciones, como si lo escribiera un cliente satisfecho real. No inventar nombre.>",
+  "quote_cta": "<frase de cierre persuasiva personalizada al negocio, máx 15 palabras. Ej: 'Tu próximo proyecto merece las mejores manos'>"
 }`
 
   const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5',
-    max_tokens: 1024,
+    model: 'claude-sonnet-4-5-20250514',
+    max_tokens: 1500,
     messages: [{ role: 'user', content: prompt }],
   })
 
@@ -98,6 +128,17 @@ Respondé ÚNICAMENTE con JSON válido, sin texto antes ni después:
   if (!parsed.secondary_color || !parsed.secondary_color.startsWith('#')) parsed.secondary_color = '#16213e'
   if (!parsed.cta_text) parsed.cta_text = 'Contactanos'
   if (!parsed.about_text) parsed.about_text = `${businessName} es un negocio de ${category} ubicado en ${address}.`
+  if (!Array.isArray(parsed.unique_selling_points) || parsed.unique_selling_points.length === 0) {
+    parsed.unique_selling_points = [`Especialistas en ${category}`, 'Atención personalizada', 'Ubicación accesible']
+  }
+  if (!Array.isArray(parsed.faq) || parsed.faq.length === 0) {
+    parsed.faq = [
+      { question: `¿Qué servicios ofrece ${businessName}?`, answer: `Ofrecemos servicios profesionales de ${category}. Contactanos para más detalles.` },
+      { question: '¿Cómo puedo contactarlos?', answer: 'Podés escribirnos por WhatsApp o llamarnos por teléfono. Te respondemos en minutos.' },
+    ]
+  }
+  if (!parsed.testimonial_style) parsed.testimonial_style = `Excelente atención y muy profesionales. Recomiendo totalmente sus servicios de ${category}.`
+  if (!parsed.quote_cta) parsed.quote_cta = `Tu negocio merece la mejor presencia online`
 
   // ── Selección inteligente de imágenes ──
   // Google photo = foto real del local (Google Street View o del negocio en Maps)
