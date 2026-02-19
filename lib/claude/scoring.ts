@@ -2,6 +2,51 @@ import { getAnthropicClient } from './client'
 import { ScoreDetails } from '@/types'
 import { SiteScrapedData } from '@/lib/scraper/site-scraper'
 
+// Condensed Web Interface Guidelines for scoring — rules observable from scraped HTML
+const WEB_INTERFACE_GUIDELINES = `
+GUÍA DE AUDITORÍA WEB (usá estas reglas al evaluar diseño, responsive, SEO y modernidad):
+
+Accesibilidad:
+- Todas las <img> deben tener atributo alt descriptivo
+- Cada <input>/<select>/<textarea> debe tener un <label> asociado (for/id o envolvente)
+- Usar <button> para acciones, NO <div onClick> ni <a href="#">
+- Jerarquía de headings correcta: un solo <h1>, luego <h2>, <h3> sin saltear niveles
+- Botones con solo ícono deben tener aria-label
+- No usar user-scalable=no en viewport meta (bloquea zoom en móviles)
+- No usar outline:none/outline:0 sin reemplazo visible para focus
+
+Imágenes y rendimiento:
+- <img> debe tener width y height explícitos (previene layout shift / CLS)
+- Imágenes debajo del fold: loading="lazy"
+- Usar <link rel="preconnect"> para dominios de fuentes/CDN externas
+- Precargar fuentes críticas con <link rel="preload">
+- Evitar transition:all en CSS (transicionar propiedades específicas)
+
+Formularios:
+- Inputs deben usar el type correcto (email, tel, url, search, number)
+- Usar autocomplete en campos de nombre, email, dirección, tarjeta
+- Labels deben ser clickeables (asociados al input)
+
+SEO y meta:
+- Debe tener <meta name="viewport"> correctamente configurado
+- Debe tener <meta name="description"> con contenido relevante
+- Preferible tener <meta name="theme-color"> para personalizar navegador móvil
+- Title debe ser descriptivo y único
+
+Tipografía:
+- Usar comillas tipográficas (" ") y apóstrofos correctos (')
+- Usar carácter de puntos suspensivos (…) en vez de tres puntos (...)
+- Números en tablas/precios deben usar font-variant-numeric: tabular-nums
+
+Anti-patrones graves (penalizar fuerte):
+- <div> o <span> con onClick como botón — falta de accesibilidad
+- Imágenes sin dimensiones — causa layout shift
+- Inputs sin label — formularios inaccesibles
+- user-scalable=no — bloquea accesibilidad en móviles
+- outline:none global sin :focus-visible alternativo
+- <a href="#"> como botón — semántica incorrecta
+`.trim()
+
 export async function analyzeWebsite(
   url: string,
   scraped: SiteScrapedData
@@ -39,7 +84,10 @@ HTML del sitio (estructura técnica):
 ${scraped.htmlSnippet.slice(0, 2000).replace(/`/g, "'").replace(/\$/g, '')}
 ---
 
+${WEB_INTERFACE_GUIDELINES}
+
 IMPORTANTE PARA EL SCORING:
+- Usá las reglas de la guía de auditoría web para evaluar diseño, responsive, SEO y modernidad. Mencioná violaciones específicas en "problems".
 - Si el tipo es "link_in_bio", "menu_only" o "social_redirect", el score máximo es 3/10 — no son sitios web reales
 - Si el sitio cargó con error, el score máximo es 2/10
 - Sé muy crítico con el diseño visual — si no hay imágenes propias del negocio, penalizá fuerte
@@ -77,7 +125,7 @@ Respondé ÚNICAMENTE con JSON válido:
 
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5',
-    max_tokens: 1024,
+    max_tokens: 1500,
     messages: [{ role: 'user', content: prompt }],
   })
 

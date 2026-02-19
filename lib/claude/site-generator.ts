@@ -73,6 +73,17 @@ REGLAS IMPORTANTES:
 - La frase de cierre (quote_cta) debe ser persuasiva y personalizada al negocio, no genérica.
 - Las FAQ deben ser preguntas que un cliente real haría sobre este tipo de negocio.
 
+DIRECTRICES DE DISEÑO (aplicar al contenido generado):
+- Elegí colores BOLD y con personalidad — nada de paletas genéricas (#1a1a2e azul oscuro genérico).
+  Colores dominantes con acentos contrastantes. Que el primary_color refleje la identidad del rubro.
+- El tagline debe ser memorable y con carácter — no frases genéricas de IA.
+- La hero_description debe tener tono editorial, como una revista, no como un folleto corporativo.
+- Los USPs deben ser concretos y con punch, no genéricos ("Atención personalizada" está prohibido).
+- El testimonial_style debe sonar auténtico, coloquial argentino, no pulido.
+- El quote_cta debe ser una frase que se recuerde, con personalidad propia del negocio.
+- Evitar estética genérica de IA: sin clichés, sin frases vacías, sin colores predecibles.
+- Pensar en composición visual: el contenido debe funcionar con layouts asimétricos y espaciado generoso.
+
 Respondé ÚNICAMENTE con JSON válido, sin texto antes ni después:
 {
   "tagline": "<eslogan corto y atractivo, máximo 8 palabras, basado en lo que realmente ofrece>",
@@ -101,8 +112,8 @@ Respondé ÚNICAMENTE con JSON válido, sin texto antes ni después:
 }`
 
   const message = await anthropic.messages.create({
-    model: 'claude-sonnet-4-5-20250514',
-    max_tokens: 1500,
+    model: 'claude-sonnet-4-6',
+    max_tokens: 2000,
     messages: [{ role: 'user', content: prompt }],
   })
 
