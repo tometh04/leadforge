@@ -156,7 +156,7 @@ ${SITE_REFERENCE_HTML}
 
 Generá el HTML completo ahora. Sin explicaciones, sin markdown, sin bloques de código.`
 
-  const message = await anthropic.messages.create({
+  const stream = anthropic.messages.stream({
     model: 'claude-sonnet-4-6',
     max_tokens: 24000,
     messages: [
@@ -165,6 +165,7 @@ Generá el HTML completo ahora. Sin explicaciones, sin markdown, sin bloques de 
     ],
   })
 
+  const message = await stream.finalMessage()
   const rawText = message.content[0].type === 'text' ? message.content[0].text : ''
 
   // The assistant prefill was "<!DOCTYPE html>", so prepend it to the response

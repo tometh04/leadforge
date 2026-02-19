@@ -25,7 +25,7 @@ interface LeadCardModalProps {
   onUpdate: (updated: Lead) => void
   onAnalyze: () => Promise<void>
   analyzing: boolean
-  onGenerateSite: () => Promise<void>
+  onGenerateSite: () => void
   generatingSite: boolean
   onOpenWhatsApp: () => void
 }

@@ -32,7 +32,7 @@ export default function KanbanPage() {
   const [activity, setActivity] = useState<LeadActivity[]>([])
   const [modalOpen, setModalOpen] = useState(false)
   const [analyzing, setAnalyzing] = useState<string | null>(null)
-  const [generatingSite, setGeneratingSite] = useState<string | null>(null)
+  const [generatingSite, setGeneratingSite] = useState<Set<string>>(new Set())
   const [whatsappLead, setWhatsappLead] = useState<Lead | null>(null)
   const [bulkAnalyzing, setBulkAnalyzing] = useState(false)
 
@@ -140,27 +140,35 @@ export default function KanbanPage() {
   }
 
   /* ── GENERATE SITE ── */
-  const handleGenerateSite = async (lead: Lead) => {
-    setGeneratingSite(lead.id)
-    try {
-      const res = await fetch(`/api/generate-site/${lead.id}`, { method: 'POST' })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      toast.success('🌐 Sitio generado')
+  const handleGenerateSite = (lead: Lead) => {
+    setGeneratingSite((prev) => new Set(prev).add(lead.id))
+    toast.info(`Generando sitio para ${lead.business_name}...`)
 
-      const leadRes = await fetch(`/api/leads/${lead.id}`)
-      const updated = await leadRes.json()
-      setLeads((prev) => prev.map((l) => (l.id === lead.id ? updated : l)))
-      if (selectedLead?.id === lead.id) {
-        setSelectedLead(updated)
-        const actRes = await fetch(`/api/leads/${lead.id}/activity`)
-        setActivity(await actRes.json())
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Error al generar sitio')
-    } finally {
-      setGeneratingSite(null)
-    }
+    fetch(`/api/generate-site/${lead.id}`, { method: 'POST' })
+      .then(async (res) => {
+        const data = await res.json()
+        if (!res.ok) throw new Error(data.error)
+        toast.success(`🌐 Sitio generado para ${lead.business_name}`)
+
+        const leadRes = await fetch(`/api/leads/${lead.id}`)
+        const updated = await leadRes.json()
+        setLeads((prev) => prev.map((l) => (l.id === lead.id ? updated : l)))
+        if (selectedLead?.id === lead.id) {
+          setSelectedLead(updated)
+          const actRes = await fetch(`/api/leads/${lead.id}/activity`)
+          setActivity(await actRes.json())
+        }
+      })
+      .catch((err) => {
+        toast.error(err instanceof Error ? err.message : 'Error al generar sitio')
+      })
+      .finally(() => {
+        setGeneratingSite((prev) => {
+          const next = new Set(prev)
+          next.delete(lead.id)
+          return next
+        })
+      })
   }
 
   /* ── UPDATE LEAD ── */
@@ -326,7 +334,7 @@ export default function KanbanPage() {
                                       🌐 Sitio listo
                                     </span>
                                   )}
-                                  {(analyzing === lead.id || generatingSite === lead.id) && (
+                                  {(analyzing === lead.id || generatingSite.has(lead.id)) && (
                                     <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700">
                                       <Loader2 className="h-2.5 w-2.5 animate-spin" />
                                       {analyzing === lead.id ? 'Analizando' : 'Generando'}
@@ -363,8 +371,8 @@ export default function KanbanPage() {
         onUpdate={handleLeadUpdate}
         onAnalyze={() => selectedLead ? handleAnalyze(selectedLead) : Promise.resolve()}
         analyzing={analyzing === selectedLead?.id}
-        onGenerateSite={() => selectedLead ? handleGenerateSite(selectedLead) : Promise.resolve()}
-        generatingSite={generatingSite === selectedLead?.id}
+        onGenerateSite={() => { if (selectedLead) handleGenerateSite(selectedLead) }}
+        generatingSite={!!selectedLead && generatingSite.has(selectedLead.id)}
         onOpenWhatsApp={() => selectedLead && setWhatsappLead(selectedLead)}
       />
 
