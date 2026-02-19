@@ -3,48 +3,79 @@ import { ScoreDetails } from '@/types'
 import { SiteScrapedData } from '@/lib/scraper/site-scraper'
 
 // Condensed Web Interface Guidelines for scoring — rules observable from scraped HTML
+// Based on Vercel Web Interface Guidelines, filtered to what's auditable from HTML/CSS
 const WEB_INTERFACE_GUIDELINES = `
 GUÍA DE AUDITORÍA WEB (usá estas reglas al evaluar diseño, responsive, SEO y modernidad):
 
 Accesibilidad:
-- Todas las <img> deben tener atributo alt descriptivo
-- Cada <input>/<select>/<textarea> debe tener un <label> asociado (for/id o envolvente)
+- Todas las <img> deben tener alt descriptivo
+- Cada <input>/<select>/<textarea> debe tener <label> asociado (for/id o envolvente)
 - Usar <button> para acciones, NO <div onClick> ni <a href="#">
-- Jerarquía de headings correcta: un solo <h1>, luego <h2>, <h3> sin saltear niveles
+- Jerarquía de headings correcta: un solo <h1>, luego <h2>/<h3> sin saltear niveles
 - Botones con solo ícono deben tener aria-label
-- No usar user-scalable=no en viewport meta (bloquea zoom en móviles)
-- No usar outline:none/outline:0 sin reemplazo visible para focus
+- No usar user-scalable=no en viewport (bloquea zoom)
 
-Imágenes y rendimiento:
+Focus states:
+- No usar outline:none/outline:0 sin reemplazo visible
+- Elementos interactivos deben tener :focus-visible distinguible
+- Tab order lógico (sin tabindex positivos arbitrarios)
+
+Imágenes y performance:
 - <img> debe tener width y height explícitos (previene layout shift / CLS)
 - Imágenes debajo del fold: loading="lazy"
 - Usar <link rel="preconnect"> para dominios de fuentes/CDN externas
-- Precargar fuentes críticas con <link rel="preload">
-- Evitar transition:all en CSS (transicionar propiedades específicas)
+- Precargar fuentes críticas con <link rel="preload"> y font-display:swap
+- Evitar transition:all — transicionar propiedades específicas
+
+Touch e interacción móvil:
+- Hit targets mínimos de 44px en móvil (botones, links)
+- Inputs con font-size >= 16px (evita auto-zoom en iOS)
+- No deshabilitar zoom ni pinch (user-scalable=no, maximum-scale=1)
+- Preferir touch-action:manipulation en botones/links
 
 Formularios:
-- Inputs deben usar el type correcto (email, tel, url, search, number)
-- Usar autocomplete en campos de nombre, email, dirección, tarjeta
-- Labels deben ser clickeables (asociados al input)
+- Inputs deben usar type correcto (email, tel, url, search, number)
+- Usar autocomplete en campos de nombre, email, dirección
+- Labels clickeables asociados al input
+- No bloquear paste en campos de contraseña (onPaste preventDefault)
 
 SEO y meta:
-- Debe tener <meta name="viewport"> correctamente configurado
-- Debe tener <meta name="description"> con contenido relevante
-- Preferible tener <meta name="theme-color"> para personalizar navegador móvil
-- Title debe ser descriptivo y único
+- <meta name="viewport"> correctamente configurado
+- <meta name="description"> con contenido relevante
+- Title descriptivo y único
+- <meta name="theme-color"> para personalizar navegador móvil
+- color-scheme: light/dark si soporta temas
+
+Layout y responsive:
+- Usar flex/grid para layouts, no floats ni tables para estructura
+- Respetar safe areas en móviles (env(safe-area-inset-*))
+- Contenido no debe desbordarse horizontalmente (overflow-x)
+- Texto legible sin zoom en móvil (>= 14px base)
+
+Navegación y estado:
+- Links deben ser <a> con href válido (no <div> ni <span> clickeable)
+- Estados hover visibles en botones y links
+- Contenido con overflow debe tener truncation o scroll apropiado
+
+Animaciones:
+- Respetar prefers-reduced-motion (no animaciones agresivas sin media query)
+- Duraciones razonables (150-500ms), sin animaciones infinitas decorativas
 
 Tipografía:
-- Usar comillas tipográficas (" ") y apóstrofos correctos (')
-- Usar carácter de puntos suspensivos (…) en vez de tres puntos (...)
-- Números en tablas/precios deben usar font-variant-numeric: tabular-nums
+- Comillas tipográficas (" ") y apóstrofos correctos (')
+- Puntos suspensivos (…) en vez de tres puntos (...)
+- font-variant-numeric: tabular-nums en precios/tablas
 
 Anti-patrones graves (penalizar fuerte):
-- <div> o <span> con onClick como botón — falta de accesibilidad
-- Imágenes sin dimensiones — causa layout shift
+- <div>/<span> con onClick como botón — inaccesible
+- Imágenes sin width/height — layout shift
 - Inputs sin label — formularios inaccesibles
-- user-scalable=no — bloquea accesibilidad en móviles
+- user-scalable=no o maximum-scale=1 — bloquea accesibilidad
 - outline:none global sin :focus-visible alternativo
 - <a href="#"> como botón — semántica incorrecta
+- onPaste preventDefault — bloquea paste de contraseñas
+- transition:all — performance y accesibilidad
+- Botones con solo ícono sin aria-label — inaccesibles
 `.trim()
 
 export async function analyzeWebsite(
