@@ -1,8 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Las vars server-only se leen desde .env.local directamente en los lib/claude/client.ts
-  // No es necesario exponerlas aquí
+  // Deshabilitar Turbopack en producción — causa MIDDLEWARE_INVOCATION_FAILED en Vercel
+  experimental: {},
 };
 
 export default nextConfig;
