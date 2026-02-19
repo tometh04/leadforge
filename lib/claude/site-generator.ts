@@ -1,4 +1,5 @@
 import { getAnthropicClient } from './client'
+import { SITE_REFERENCE_HTML } from './site-reference'
 
 export interface ScrapedBusinessData {
   visibleText?: string
@@ -119,15 +120,22 @@ REGLAS DE CONTENIDO:
 - Todo el texto debe estar en español argentino
 - El tagline debe ser memorable y con personalidad, no genérico
 
-DISEÑO — LIBERTAD TOTAL:
-- Tenés libertad total sobre el layout, secciones, estructura y estilo visual
-- Elegí colores BOLD que reflejen la identidad del rubro — nada de paletas genéricas
+GUARDARAILES DE RENDERING (OBLIGATORIO — si violás alguno, el sitio se descarta):
+- El body DEBE tener un background claro (blanco, crema, gris claro, etc.) — NUNCA fondo negro u oscuro como default
+- Todo el texto principal debe ser oscuro sobre fondo claro para máximo contraste y legibilidad
+- NUNCA uses display:none, visibility:hidden, opacity:0 en contenido principal
+- NUNCA uses color de texto igual o similar al color de fondo (ej: texto blanco sobre fondo blanco)
+- El hero y todas las secciones deben ser visibles sin interacción del usuario
+- Probá mentalmente: si alguien abre este HTML en un navegador, ¿se ve todo el contenido inmediatamente? Si no, corregilo
+
+DISEÑO — CREATIVO PERO SEGURO:
+- Elegí colores que reflejen la identidad del rubro — paleta coherente con buen contraste
 - Usá tipografía con carácter y jerarquía visual clara
 - Pensá en composición editorial: asimetría, espaciado generoso, ritmo visual
 - Animaciones CSS sutiles (transitions, hover effects) son bienvenidas
-- Evitá la estética genérica de IA: sin clichés visuales, sin layouts predecibles
 - Cada sitio debe sentirse único y artesanal
 - Diseñá como si fuera tu portfolio — este sitio tiene que impresionar al dueño del negocio
+- Podés usar secciones con fondo de color (no oscuro al 100%) para dar ritmo visual, pero el contenido siempre debe ser legible
 
 SECCIONES SUGERIDAS (pero podés reorganizar o renombrar como quieras):
 - Hero/Header con CTA prominente a WhatsApp
@@ -140,15 +148,27 @@ SECCIONES SUGERIDAS (pero podés reorganizar o renombrar como quieras):
 - Contacto con mapa
 - Footer
 
-Respondé ÚNICAMENTE con el HTML completo. Sin explicaciones, sin markdown, sin bloques de código. Solo el HTML puro empezando con <!DOCTYPE html>.`
+HTML DE REFERENCIA — Este es un ejemplo de la CALIDAD y ESTRUCTURA que espero. Tu output debe tener este nivel de calidad o superior, pero adaptado al negocio específico. NO copies este HTML textualmente, usalo como referencia de patrones correctos:
+
+<reference>
+${SITE_REFERENCE_HTML}
+</reference>
+
+Generá el HTML completo ahora. Sin explicaciones, sin markdown, sin bloques de código.`
 
   const message = await anthropic.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 16000,
-    messages: [{ role: 'user', content: prompt }],
+    max_tokens: 24000,
+    messages: [
+      { role: 'user', content: prompt },
+      { role: 'assistant', content: '<!DOCTYPE html>' },
+    ],
   })
 
-  const text = message.content[0].type === 'text' ? message.content[0].text : ''
+  const rawText = message.content[0].type === 'text' ? message.content[0].text : ''
+
+  // The assistant prefill was "<!DOCTYPE html>", so prepend it to the response
+  const text = `<!DOCTYPE html>${rawText}`
 
   // Extraer el HTML de la respuesta
   const htmlMatch = text.match(/<!DOCTYPE\s+html[\s\S]*<\/html>/i)
