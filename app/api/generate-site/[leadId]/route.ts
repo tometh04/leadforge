@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { generateSiteContent, slugify, ScrapedBusinessData } from '@/lib/claude/site-generator'
-import { buildSiteHTML } from '@/lib/site-builder/template'
+import { generateSiteHTML, slugify, ScrapedBusinessData } from '@/lib/claude/site-generator'
 import { fetchPlaceDetails } from '@/lib/google-places/client'
 
 export async function POST(
@@ -46,7 +45,6 @@ export async function POST(
           logoUrl: rawLogoUrl,
           socialLinks: (existingDetails.social_links as { platform: string; url: string }[]) ?? [],
           siteType: (existingDetails.site_type as string) ?? undefined,
-          // Google photo from lead row (set during Places scraping)
           googlePhotoUrl: lead.google_photo_url ?? null,
         }
       : lead.google_photo_url
@@ -58,11 +56,9 @@ export async function POST(
     let googleRating: number | null = lead.rating ?? null
     let googleReviewCount: number | null = null
 
-    // Chequeamos si ya tenemos horarios cacheados en score_details
     if (existingDetails.opening_hours) {
       openingHours = existingDetails.opening_hours as string[]
     }
-    // Si tenemos place_id, fetcheamos horarios y review count frescos
     if (lead.place_id) {
       try {
         const details = await fetchPlaceDetails(lead.place_id)
@@ -74,29 +70,29 @@ export async function POST(
       }
     }
 
-    // 4. Generar contenido con Claude, enriquecido con datos reales del sitio
-    const content = await generateSiteContent(
-      lead.business_name,
-      lead.category ?? lead.niche,
-      lead.address ?? '',
-      lead.phone ?? '',
-      scrapedData,
-      googleRating,
-      googleReviewCount
-    )
+    // 4. Preparar imágenes para Claude
+    const allImageUrls: string[] = []
+    if (scrapedData?.googlePhotoUrl) allImageUrls.push(scrapedData.googlePhotoUrl)
+    if (scrapedData?.imageUrls) {
+      for (const url of scrapedData.imageUrls) {
+        if (!allImageUrls.includes(url) && url !== rawLogoUrl) {
+          allImageUrls.push(url)
+        }
+      }
+    }
 
-    // 5. Construir el HTML
-    const html = buildSiteHTML({
+    // 5. Generar HTML completo con Claude
+    const html = await generateSiteHTML({
       businessName: lead.business_name,
       category: lead.category ?? lead.niche,
       address: lead.address ?? '',
       phone: lead.phone ?? '',
-      website: lead.website ?? '',
-      googleMapsUrl: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lead.address ?? lead.business_name)}`,
+      scraped: scrapedData,
       googleRating,
-      googleReviews: googleReviewCount,
+      googleReviewCount,
       openingHours,
-      content,
+      imageUrls: allImageUrls,
+      logoUrl: rawLogoUrl,
     })
 
     // 6. Generar slug único
@@ -131,7 +127,6 @@ export async function POST(
     return NextResponse.json({
       preview_url: previewUrl,
       slug,
-      content,
     })
   } catch (error) {
     console.error('[generate-site]', error)
