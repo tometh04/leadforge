@@ -2,13 +2,15 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, Search, Kanban, Zap, LogOut } from 'lucide-react'
+import { LayoutDashboard, Search, Kanban, Zap, LogOut, Rocket, MessageCircle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/scraper', label: 'Scraper', icon: Search },
   { href: '/kanban', label: 'Pipeline', icon: Kanban },
+  { href: '/autopilot', label: 'Autopilot', icon: Rocket },
+  { href: '/whatsapp', label: 'WhatsApp', icon: MessageCircle },
 ]
 
 export default function DashboardShell({ children }: { children: React.ReactNode }) {

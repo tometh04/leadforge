@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run build:*)",
+      "Bash(npx supabase migration new:*)",
+      "Bash(curl:*)",
+      "Bash(git push:*)",
+      "WebFetch(domain:github.com)"
+    ]
+  }
+}

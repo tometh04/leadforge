@@ -75,6 +75,53 @@ export interface ScraperSearch {
   discarded: number
 }
 
+export interface PipelineRun {
+  id: string
+  created_at: string
+  niche: string
+  city: string
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
+  total_leads: number
+  analyzed: number
+  sites_generated: number
+  messages_sent: number
+  errors: Array<{ leadId: string; step: string; error: string }>
+  completed_at: string | null
+}
+
+export type PipelineStage =
+  | 'idle'
+  | 'searching'
+  | 'importing'
+  | 'analyzing'
+  | 'generating_sites'
+  | 'generating_messages'
+  | 'sending'
+  | 'done'
+  | 'error'
+
+export interface PipelineLeadState {
+  leadId: string
+  businessName: string
+  phone: string
+  status:
+    | 'pending'
+    | 'analyzing'
+    | 'analyzed'
+    | 'generating_site'
+    | 'site_generated'
+    | 'generating_message'
+    | 'message_ready'
+    | 'sending'
+    | 'sent'
+    | 'skipped'
+    | 'error'
+  score?: number
+  siteUrl?: string
+  message?: string
+  error?: string
+}
+
 export interface ScraperResult {
   place_id: string
   business_name: string

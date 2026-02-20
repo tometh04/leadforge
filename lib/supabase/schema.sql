@@ -71,8 +71,32 @@ CREATE TABLE IF NOT EXISTS scraper_searches (
 
 CREATE INDEX idx_scraper_searches_created_at ON scraper_searches(created_at DESC);
 
+-- Auth state de WhatsApp (Baileys)
+CREATE TABLE IF NOT EXISTS whatsapp_auth (
+  id text PRIMARY KEY,
+  data jsonb NOT NULL,
+  updated_at timestamptz DEFAULT now()
+);
+
+-- Historial de ejecuciones del pipeline autopilot
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_at timestamptz DEFAULT now(),
+  niche text NOT NULL,
+  city text NOT NULL,
+  status text DEFAULT 'running' CHECK (status IN ('running','completed','failed','cancelled')),
+  total_leads integer DEFAULT 0,
+  analyzed integer DEFAULT 0,
+  sites_generated integer DEFAULT 0,
+  messages_sent integer DEFAULT 0,
+  errors jsonb DEFAULT '[]',
+  completed_at timestamptz
+);
+
 -- RLS (Row Level Security) — desactivado para MVP single-user
 ALTER TABLE leads DISABLE ROW LEVEL SECURITY;
 ALTER TABLE messages DISABLE ROW LEVEL SECURITY;
 ALTER TABLE lead_activity DISABLE ROW LEVEL SECURITY;
 ALTER TABLE scraper_searches DISABLE ROW LEVEL SECURITY;
+ALTER TABLE whatsapp_auth DISABLE ROW LEVEL SECURITY;
+ALTER TABLE pipeline_runs DISABLE ROW LEVEL SECURITY;
