@@ -49,6 +49,8 @@ export async function POST(
           emails: (existingDetails.emails as string[]) ?? [],
           pageTitle: (existingDetails.page_title as string) ?? '',
           metaDescription: (existingDetails.meta_description as string) ?? '',
+          subPagesText: (existingDetails.sub_pages_text as string) ?? '',
+          subPagesCount: (existingDetails.sub_pages_count as number) ?? 0,
         }
       : lead.google_photo_url
         ? { googlePhotoUrl: lead.google_photo_url }

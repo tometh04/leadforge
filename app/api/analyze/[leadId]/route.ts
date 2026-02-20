@@ -57,6 +57,8 @@ export async function POST(
           emails: scraped.emails,
           page_title: scraped.title,
           meta_description: scraped.description,
+          sub_pages_text: scraped.subPagesText.slice(0, 6000),
+          sub_pages_count: scraped.subPagesCount,
         },
         status: newStatus,
       })
