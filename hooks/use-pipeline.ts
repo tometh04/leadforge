@@ -165,7 +165,7 @@ export function usePipeline() {
       const leadsData = await leadsRes.json()
       if (!leadsRes.ok) throw new Error(leadsData.error)
 
-      const importedLeads = leadsData.data ?? leadsData
+      const importedLeads = leadsData.leads ?? leadsData.data ?? leadsData
       const leadStates: PipelineLeadState[] = (Array.isArray(importedLeads) ? importedLeads : []).map(
         (l: { id: string; business_name: string; phone: string; website: string; status: string }) => ({
           leadId: l.id,
@@ -176,6 +176,9 @@ export function usePipeline() {
       )
 
       dispatch({ type: 'SET_LEADS', leads: leadStates })
+      for (let i = 0; i < leadStates.length; i++) {
+        dispatch({ type: 'INCREMENT', key: 'imported' })
+      }
       await updateRun(runData.id, { total_leads: leadStates.length })
 
       // ── 3. ANALYZE ──
@@ -194,6 +197,7 @@ export function usePipeline() {
 
             if (res.ok) {
               lead.score = data.score
+              lead.status = 'analyzed'
               dispatch({
                 type: 'UPDATE_LEAD',
                 leadId: lead.leadId,
@@ -201,18 +205,22 @@ export function usePipeline() {
               })
               dispatch({ type: 'INCREMENT', key: 'analyzed' })
             } else {
+              lead.status = 'error'
               dispatch({
                 type: 'UPDATE_LEAD',
                 leadId: lead.leadId,
-                updates: { status: 'analyzed' },
+                updates: { status: 'error', error: data.error || 'Error al analizar' },
               })
+              dispatch({ type: 'INCREMENT', key: 'errors' })
             }
-          } catch {
+          } catch (err) {
+            lead.status = 'error'
             dispatch({
               type: 'UPDATE_LEAD',
               leadId: lead.leadId,
-              updates: { status: 'analyzed' },
+              updates: { status: 'error', error: err instanceof Error ? err.message : 'Error' },
             })
+            dispatch({ type: 'INCREMENT', key: 'errors' })
           }
         }
 
@@ -247,7 +255,8 @@ export function usePipeline() {
             const data = await res.json()
 
             if (res.ok) {
-              lead.siteUrl = data.url || data.siteUrl
+              lead.siteUrl = data.preview_url
+              lead.status = 'site_generated'
               dispatch({
                 type: 'UPDATE_LEAD',
                 leadId: lead.leadId,
@@ -255,6 +264,7 @@ export function usePipeline() {
               })
               dispatch({ type: 'INCREMENT', key: 'sitesGenerated' })
             } else {
+              lead.status = 'error'
               dispatch({
                 type: 'UPDATE_LEAD',
                 leadId: lead.leadId,
@@ -263,6 +273,7 @@ export function usePipeline() {
               dispatch({ type: 'INCREMENT', key: 'errors' })
             }
           } catch (err) {
+            lead.status = 'error'
             dispatch({
               type: 'UPDATE_LEAD',
               leadId: lead.leadId,
@@ -300,6 +311,7 @@ export function usePipeline() {
 
             if (res.ok) {
               lead.message = data.message
+              lead.status = 'message_ready'
               dispatch({
                 type: 'UPDATE_LEAD',
                 leadId: lead.leadId,
@@ -307,6 +319,7 @@ export function usePipeline() {
               })
               dispatch({ type: 'INCREMENT', key: 'messagesGenerated' })
             } else {
+              lead.status = 'error'
               dispatch({
                 type: 'UPDATE_LEAD',
                 leadId: lead.leadId,
@@ -315,6 +328,7 @@ export function usePipeline() {
               dispatch({ type: 'INCREMENT', key: 'errors' })
             }
           } catch (err) {
+            lead.status = 'error'
             dispatch({
               type: 'UPDATE_LEAD',
               leadId: lead.leadId,
@@ -370,6 +384,8 @@ export function usePipeline() {
                       const data = JSON.parse(line.slice(6))
 
                       if (data.type === 'sent') {
+                        const sentLead = leadStates.find((l) => l.leadId === data.leadId)
+                        if (sentLead) sentLead.status = 'sent'
                         dispatch({
                           type: 'UPDATE_LEAD',
                           leadId: data.leadId,
@@ -377,6 +393,8 @@ export function usePipeline() {
                         })
                         dispatch({ type: 'INCREMENT', key: 'sent' })
                       } else if (data.type === 'error') {
+                        const errLead = leadStates.find((l) => l.leadId === data.leadId)
+                        if (errLead) errLead.status = 'error'
                         dispatch({
                           type: 'UPDATE_LEAD',
                           leadId: data.leadId,
