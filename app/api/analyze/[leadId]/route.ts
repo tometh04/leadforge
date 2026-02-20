@@ -54,6 +54,9 @@ export async function POST(
           logo_url: scraped.logoUrl,
           social_links: scraped.socialLinks,
           visible_text: scraped.visibleText.slice(0, 2000),
+          emails: scraped.emails,
+          page_title: scraped.title,
+          meta_description: scraped.description,
         },
         status: newStatus,
       })

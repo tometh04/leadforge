@@ -46,6 +46,9 @@ export async function POST(
           socialLinks: (existingDetails.social_links as { platform: string; url: string }[]) ?? [],
           siteType: (existingDetails.site_type as string) ?? undefined,
           googlePhotoUrl: lead.google_photo_url ?? null,
+          emails: (existingDetails.emails as string[]) ?? [],
+          pageTitle: (existingDetails.page_title as string) ?? '',
+          metaDescription: (existingDetails.meta_description as string) ?? '',
         }
       : lead.google_photo_url
         ? { googlePhotoUrl: lead.google_photo_url }

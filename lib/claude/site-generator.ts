@@ -8,6 +8,9 @@ export interface ScrapedBusinessData {
   socialLinks?: { platform: string; url: string }[]
   siteType?: string
   googlePhotoUrl?: string | null
+  emails?: string[]
+  pageTitle?: string
+  metaDescription?: string
 }
 
 export interface SiteGenerationParams {
@@ -46,15 +49,18 @@ export async function generateSiteHTML(params: SiteGenerationParams): Promise<st
     : null
 
   const safeText =
-    scraped?.visibleText?.slice(0, 1500).replace(/`/g, "'").replace(/\$/g, '') ??
+    scraped?.visibleText?.slice(0, 3000).replace(/`/g, "'").replace(/\$/g, '') ??
     'No disponible'
 
   const realDataContext = scraped
     ? `
 Datos reales extraídos del sitio web actual:
+- Título del sitio actual: ${scraped.pageTitle || 'No disponible'}
+- Meta description: ${scraped.metaDescription || 'No disponible'}
 - Texto visible actual: ${safeText}
 - Tiene logo propio: ${scraped.logoUrl ? 'Sí' : 'No'}
 - Tipo de web actual: ${scraped.siteType ?? 'desconocido'}
+- Emails de contacto: ${scraped.emails?.length ? scraped.emails.join(', ') : 'No detectados'}
 - Redes sociales: ${scraped.socialLinks?.map((s) => `${s.platform}: ${s.url}`).join(', ') || 'No detectadas'}
 `
     : ''
@@ -113,9 +119,20 @@ INSTRUCCIONES TÉCNICAS:
 - Embebé el mapa de Google Maps si la URL está disponible
 - Lang="es" en el <html>
 
+EXTRACCIÓN DE INFORMACIÓN — Antes de diseñar, analizá el texto visible y extraé:
+- Nombres propios (dueño, equipo, marca) — usalos en "Sobre nosotros" en vez de texto genérico
+- Servicios/productos específicos mencionados — desarrollá cada uno con descripción real y detallada, no genérica
+- Menciones de prensa, premios, certificaciones — si hay, creá una sección "En los medios" o "Prensa"
+- Años de trayectoria, historia, hitos — usalos en "Sobre nosotros"
+- Diferenciadores y propuestas de valor únicas del negocio
+
 REGLAS DE CONTENIDO:
-- NO inventes servicios que no estén respaldados por el texto real del sitio
-- Si no hay datos suficientes, usá solo el rubro como guía general
+- Desarrollá en profundidad los servicios/productos encontrados en el texto real del sitio — cada uno con su descripción basada en lo que dice el sitio, no genérica
+- Si hay menciones de prensa, medios o premios en el texto, creá una sección "Prensa" o "En los medios"
+- Integrá las redes sociales con íconos SVG en el footer y, si son relevantes, como sección
+- Usá nombres reales encontrados (dueño, marca, equipo) en vez de texto genérico como "nuestro equipo"
+- Si hay emails de contacto, incluirlos en la sección de contacto
+- Si no hay datos suficientes de un tema, usá solo el rubro como guía general
 - Los testimonios deben sonar como reseñas reales (sin inventar nombres, usá "Cliente verificado")
 - Todo el texto debe estar en español argentino
 - El tagline debe ser memorable y con personalidad, no genérico
@@ -139,14 +156,16 @@ DISEÑO — CREATIVO PERO SEGURO:
 
 SECCIONES SUGERIDAS (pero podés reorganizar o renombrar como quieras):
 - Hero/Header con CTA prominente a WhatsApp
-- Servicios o lo que ofrece el negocio
-- Sobre nosotros / historia
+- Servicios detallados (basados en info real del sitio)
+- Sobre nosotros / historia (con nombres reales si aparecen)
 - Galería de fotos (si hay imágenes)
+- Prensa / En los medios (si hay menciones)
 - Testimonial / social proof (si hay rating de Google)
+- Redes sociales (links con íconos SVG)
 - Horarios (si están disponibles)
 - FAQ
-- Contacto con mapa
-- Footer
+- Contacto con mapa, email y teléfono
+- Footer con redes sociales integradas
 
 HTML DE REFERENCIA — Este es un ejemplo de la CALIDAD y ESTRUCTURA que espero. Tu output debe tener este nivel de calidad o superior, pero adaptado al negocio específico. NO copies este HTML textualmente, usalo como referencia de patrones correctos:
 
