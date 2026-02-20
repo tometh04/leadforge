@@ -78,6 +78,52 @@ Anti-patrones graves (penalizar fuerte):
 - Botones con solo ícono sin aria-label — inaccesibles
 `.trim()
 
+/** Intenta reparar JSON truncado cerrando strings, arrays y objetos abiertos */
+function repairTruncatedJson(text: string): Record<string, unknown> | null {
+  let s = text.trim()
+  // Quitar markdown fences si las hay
+  s = s.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+  // Asegurarse de que empieza con {
+  const start = s.indexOf('{')
+  if (start === -1) return null
+  s = s.slice(start)
+
+  // Cerrar string abierto: contar comillas (ignorando escaped)
+  const unescapedQuotes = s.match(/(?<!\\)"/g)
+  if (unescapedQuotes && unescapedQuotes.length % 2 !== 0) {
+    s += '"'
+  }
+
+  // Eliminar trailing comma antes de cerrar
+  s = s.replace(/,\s*$/, '')
+
+  // Cerrar brackets/braces abiertos
+  const stack: string[] = []
+  let inString = false
+  let escaped = false
+  for (const ch of s) {
+    if (escaped) { escaped = false; continue }
+    if (ch === '\\' && inString) { escaped = true; continue }
+    if (ch === '"') { inString = !inString; continue }
+    if (inString) continue
+    if (ch === '{' || ch === '[') stack.push(ch)
+    if (ch === '}' && stack.length && stack[stack.length - 1] === '{') stack.pop()
+    if (ch === ']' && stack.length && stack[stack.length - 1] === '[') stack.pop()
+  }
+
+  // Close remaining open brackets in reverse order
+  while (stack.length) {
+    const open = stack.pop()
+    s += open === '{' ? '}' : ']'
+  }
+
+  try {
+    return JSON.parse(s) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
 export async function analyzeWebsite(
   url: string,
   scraped: SiteScrapedData
@@ -139,7 +185,8 @@ Respondé ÚNICAMENTE con JSON válido:
 {
   "score": <número 1-10, promedio ponderado, sé realista y crítico>,
   "summary": "<2-3 oraciones en español describiendo honestamente el estado del sitio>",
-  "problems": ["<problema concreto 1>", "<problema concreto 2>", "<problema concreto 3>", "<problema concreto 4>"],
+  "problems": ["<problema concreto 1>", "<problema concreto 2>", ...],
+IMPORTANTE: Máximo 4 problems (frases cortas de ~10 palabras). Summary máximo 2 oraciones cortas. No incluir explicaciones largas.
   "criteria_scores": {
     "design": <1-10>,
     "responsive": <1-10>,
@@ -156,7 +203,7 @@ Respondé ÚNICAMENTE con JSON válido:
 
   const message = await anthropic.messages.create({
     model: 'claude-haiku-4-5',
-    max_tokens: 1500,
+    max_tokens: 2048,
     messages: [{ role: 'user', content: prompt }],
   })
 
@@ -171,11 +218,28 @@ Respondé ÚNICAMENTE con JSON válido:
   } catch {
     // Fallback: extraer el bloque JSON con regex (busca el objeto más externo)
     const match = text.match(/\{[\s\S]*\}/)
-    if (!match) throw new Error(`Claude no devolvió JSON válido. Respuesta: ${text.slice(0, 200)}`)
-    try {
-      parsed = JSON.parse(match[0])
-    } catch (e2) {
-      throw new Error(`JSON malformado de Claude: ${(e2 as Error).message}. Fragmento: ${match[0].slice(0, 200)}`)
+    if (!match) {
+      // Si no hay ni "{", intentar reparar JSON truncado (sin cierre)
+      const openMatch = text.match(/\{[\s\S]*/)
+      if (!openMatch) throw new Error(`Claude no devolvió JSON válido. Respuesta: ${text.slice(0, 200)}`)
+      const repaired = repairTruncatedJson(openMatch[0])
+      if (repaired) {
+        parsed = repaired
+      } else {
+        throw new Error(`Claude no devolvió JSON válido. Respuesta: ${text.slice(0, 200)}`)
+      }
+    } else {
+      try {
+        parsed = JSON.parse(match[0])
+      } catch {
+        // Si el JSON tiene { y } pero sigue malformado, intentar reparar (truncación dentro de un string/array)
+        const repaired = repairTruncatedJson(match[0]) ?? repairTruncatedJson(text.slice(text.indexOf('{')))
+        if (repaired) {
+          parsed = repaired
+        } else {
+          throw new Error(`JSON malformado de Claude. Fragmento: ${match[0].slice(0, 200)}`)
+        }
+      }
     }
   }
 
