@@ -7,11 +7,40 @@ export async function GET() {
 
     // Auto-fail runs stuck for more than 6 minutes (no updated_at progress)
     const sixMinAgo = new Date(Date.now() - 6 * 60 * 1000).toISOString()
-    await supabase
+    const { data: staleRuns } = await supabase
       .from('pipeline_runs')
-      .update({ status: 'failed', stage: 'error' })
+      .select('id, stage, errors')
       .eq('status', 'running')
       .lt('updated_at', sixMinAgo)
+
+    if ((staleRuns ?? []).length > 0) {
+      const nowIso = new Date().toISOString()
+      for (const run of staleRuns ?? []) {
+        const currentErrors = Array.isArray(run.errors) ? run.errors : []
+        const nextErrors = [
+          ...currentErrors,
+          {
+            at: nowIso,
+            stage: typeof run.stage === 'string' ? run.stage : 'pipeline',
+            step: 'stale_timeout',
+            error: 'Run auto-marcado como fallido por inactividad (> 6 minutos).',
+            code: 'stale_timeout',
+          },
+        ].slice(-80)
+
+        await supabase
+          .from('pipeline_runs')
+          .update({
+            status: 'failed',
+            stage: 'error',
+            errors: nextErrors,
+            updated_at: nowIso,
+          })
+          .eq('id', run.id)
+      }
+
+      console.error(`[pipeline] Auto-failed ${(staleRuns ?? []).length} stale run(s)`)
+    }
 
     const { data, error } = await supabase
       .from('pipeline_runs')
