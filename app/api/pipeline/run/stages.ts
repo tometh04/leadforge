@@ -557,6 +557,8 @@ async function stageAnalyze(runId: string, config: PipelineConfig, fromPhase: 'a
 // ─── Stage: Generate Sites ──────────────────────────────────────────────────────
 
 async function stageGenerateSites(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
+  const SITE_GEN_BATCH_SIZE = 5
+
   const { supabase, updateRun, updatePipelineLead, isCancelled, reportError } = createRunHelpers(
     runId,
     'generate_sites'
@@ -564,12 +566,25 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
 
   await updateRun({ stage: 'generating_sites' })
 
-  const { data: freshPLeads } = await supabase
+  const { data: allPLeads } = await supabase
     .from('pipeline_leads')
     .select('*')
     .eq('run_id', runId)
 
-  let sitesCount = 0
+  // Count already-generated sites so the counter stays accurate across batches
+  const alreadyGenerated = (allPLeads ?? []).filter(
+    (pl) => pl.status === 'site_generated'
+  ).length
+
+  // Only pick leads that still need processing
+  const pendingLeads = (allPLeads ?? []).filter(
+    (pl) => pl.status !== 'site_generated' && pl.status !== 'skipped' && pl.status !== 'error'
+  )
+
+  // Take only a batch to stay within Vercel's timeout
+  const batch = pendingLeads.slice(0, SITE_GEN_BATCH_SIZE)
+
+  let sitesCount = alreadyGenerated
   let cancelled = false
 
   const processLead = async (pl: (typeof freshPLeads extends (infer T)[] | null ? T : never)) => {
@@ -747,11 +762,18 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
     }
   }
 
-  await pMap(freshPLeads ?? [], processLead, 1)
+  await pMap(batch, processLead, 1)
 
   if (cancelled) return
 
-  await advanceOrComplete(runId, 'generate_sites', config, fromPhase)
+  // Check if there are remaining leads that still need site generation
+  const remainingLeads = pendingLeads.length - batch.length
+  if (remainingLeads > 0) {
+    // Self-chain: trigger the same stage again for the next batch
+    await triggerNextStage(runId, 'generate_sites', fromPhase)
+  } else {
+    await advanceOrComplete(runId, 'generate_sites', config, fromPhase)
+  }
 }
 
 // ─── Stage: Generate Messages ───────────────────────────────────────────────────
