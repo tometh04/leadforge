@@ -72,6 +72,19 @@ const STAGES: { key: PipelineStage; label: string; icon: React.ElementType }[] =
   { key: 'sending', label: 'Enviar', icon: Send },
 ]
 
+type SiteGeneratorHealthResponse = {
+  ok: boolean
+  provider?: string
+  model?: string
+  endpoint?: string
+  hasApiKey?: boolean
+  latencyMs?: number
+  preview?: string
+  timeoutMs?: number
+  checkedAt?: string
+  error?: string
+}
+
 /** Map pipeline_lead statuses to the visual stage they belong to */
 const STATUS_TO_STAGE_KEY: Record<string, PipelineStage> = {
   analyzing: 'analyzing',
@@ -94,7 +107,7 @@ function stageIndex(stage: PipelineStage): number {
 const ACTIVE_STATUSES = ['analyzing', 'generating_site', 'generating_message', 'sending']
 
 function ElapsedTimer({ since }: { since: number }) {
-  const [now, setNow] = useState(Date.now())
+  const [now, setNow] = useState(since)
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000)
     return () => clearInterval(id)
@@ -141,6 +154,8 @@ export default function AutopilotPage() {
   const [selectedActivity, setSelectedActivity] = useState<LeadActivity[]>([])
   const [modalOpen, setModalOpen] = useState(false)
   const [loadingLead, setLoadingLead] = useState<string | null>(null)
+  const [checkingSiteModel, setCheckingSiteModel] = useState(false)
+  const [siteHealth, setSiteHealth] = useState<SiteGeneratorHealthResponse | null>(null)
 
   useEffect(() => {
     fetch('/api/whatsapp/status')
@@ -186,6 +201,35 @@ export default function AutopilotPage() {
       })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error en el pipeline')
+    }
+  }
+
+  const handleCheckSiteModel = async () => {
+    setCheckingSiteModel(true)
+    try {
+      const res = await fetch('/api/site-generator/health?timeoutMs=20000', {
+        method: 'GET',
+        cache: 'no-store',
+      })
+      const data = (await res.json()) as SiteGeneratorHealthResponse
+      setSiteHealth(data)
+
+      if (!res.ok || !data.ok) {
+        toast.error(data.error || 'No se pudo validar el modelo de sitios')
+        return
+      }
+
+      toast.success(
+        `Modelo listo (${data.provider ?? 'openai-compatible'} · ${data.latencyMs ?? '-'}ms)`
+      )
+    } catch {
+      setSiteHealth({
+        ok: false,
+        error: 'No se pudo conectar con /api/site-generator/health',
+      })
+      toast.error('No se pudo validar el modelo de sitios')
+    } finally {
+      setCheckingSiteModel(false)
     }
   }
 
@@ -369,6 +413,68 @@ export default function AutopilotPage() {
               />
               Omitir envío WhatsApp
             </label>
+          </div>
+
+          <div className="mt-4 rounded-lg border bg-muted/20 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">Salud del generador de sitios</p>
+                <p className="text-xs text-muted-foreground">
+                  Verificá conexión y modelo antes de correr el pipeline.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCheckSiteModel}
+                disabled={checkingSiteModel}
+                className="gap-2"
+              >
+                {checkingSiteModel ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
+                {checkingSiteModel ? 'Verificando...' : 'Probar modelo'}
+              </Button>
+            </div>
+
+            {siteHealth && (
+              <div
+                className={`mt-3 rounded-md border px-3 py-2 text-xs ${
+                  siteHealth.ok
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-900/20 dark:text-emerald-300'
+                    : 'border-red-300 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-900/20 dark:text-red-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  {siteHealth.ok ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  ) : (
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                  )}
+                  <span className="font-medium">
+                    {siteHealth.ok ? 'Conexión OK' : 'Error de conexión'}
+                  </span>
+                </div>
+                <p className="mt-1">
+                  Proveedor: {siteHealth.provider || '—'} · Modelo: {siteHealth.model || '—'} ·
+                  Latencia: {siteHealth.latencyMs ?? '—'}ms
+                </p>
+                <p className="mt-1 break-all text-[11px]">Endpoint: {siteHealth.endpoint || '—'}</p>
+                {siteHealth.preview && (
+                  <p className="mt-1 text-[11px]">Preview: {siteHealth.preview}</p>
+                )}
+                {!siteHealth.ok && siteHealth.error && (
+                  <p className="mt-1 text-[11px]">Detalle: {siteHealth.error}</p>
+                )}
+                {siteHealth.checkedAt && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Último check: {formatDate(siteHealth.checkedAt)}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

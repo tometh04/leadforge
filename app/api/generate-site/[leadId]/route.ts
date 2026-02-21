@@ -134,7 +134,7 @@ export async function POST(
       }
     }
 
-    // 4. Preparar imágenes para Claude
+    // 4. Preparar imágenes para el modelo
     const effectiveLogoUrl = scrapedData?.logoUrl ?? rawLogoUrl
     const allImageUrls: string[] = []
     if (scrapedData?.googlePhotoUrl) allImageUrls.push(scrapedData.googlePhotoUrl)
@@ -146,7 +146,7 @@ export async function POST(
       }
     }
 
-    // 5. Generar HTML completo con Claude
+    // 5. Generar HTML completo con el modelo
     const html = await generateSiteHTML({
       businessName: lead.business_name,
       category: lead.category ?? lead.niche,
