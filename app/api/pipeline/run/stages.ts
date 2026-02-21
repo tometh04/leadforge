@@ -60,6 +60,7 @@ export async function triggerNextStage(
   const body = JSON.stringify({ runId, stage })
   let lastStatus: number | null = null
   let lastResponseSnippet = ''
+  let loopDetected = false
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -72,17 +73,31 @@ export async function triggerNextStage(
       const responseText = await res.text().catch(() => '')
       lastStatus = res.status
       lastResponseSnippet = responseText.slice(0, 240)
+      loopDetected =
+        res.status === 508 ||
+        /INFINITE_LOOP_DETECTED/i.test(responseText) ||
+        /INFINITE_LOOP_DETECTED/i.test(lastResponseSnippet)
       console.error(
         `[triggerNextStage] Attempt ${attempt + 1} failed: ${res.status}${lastResponseSnippet ? ` — ${lastResponseSnippet}` : ''}`
       )
+      if (loopDetected) break
     } catch (err) {
       console.error(`[triggerNextStage] Attempt ${attempt + 1} error:`, err)
     }
-    if (attempt < 2) {
+    if (attempt < 2 && !loopDetected) {
       const delayMs = [2000, 5000][attempt] ?? 10000
       await new Promise((r) => setTimeout(r, delayMs))
     }
   }
+
+  if (loopDetected) {
+    console.warn(
+      `[triggerNextStage] INFINITE_LOOP_DETECTED while triggering "${stage}". Falling back to in-process continuation.`
+    )
+    await processStage(runId, stage, nextPhase)
+    return
+  }
+
   throw new Error(
     `Failed to trigger stage "${stage}" after 3 attempts${lastStatus ? ` (last status ${lastStatus})` : ''}${lastResponseSnippet ? `: ${lastResponseSnippet}` : ''}`
   )
