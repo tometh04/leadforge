@@ -20,6 +20,16 @@ interface PipelineConfig {
   skipSending: boolean
 }
 
+interface PipelineRunErrorLog {
+  at: string
+  stage: string
+  step: string
+  error: string
+  leadId?: string | null
+  businessName?: string | null
+  code?: string
+}
+
 // ─── Utilities ──────────────────────────────────────────────────────────────────
 
 export async function pMap<T>(
@@ -48,6 +58,8 @@ export async function triggerNextStage(
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
   const url = `${baseUrl}/api/pipeline/run/continue-${nextPhase}`
   const body = JSON.stringify({ runId, stage })
+  let lastStatus: number | null = null
+  let lastResponseSnippet = ''
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -57,7 +69,12 @@ export async function triggerNextStage(
         body,
       })
       if (res.ok) return
-      console.error(`[triggerNextStage] Attempt ${attempt + 1} failed: ${res.status}`)
+      const responseText = await res.text().catch(() => '')
+      lastStatus = res.status
+      lastResponseSnippet = responseText.slice(0, 240)
+      console.error(
+        `[triggerNextStage] Attempt ${attempt + 1} failed: ${res.status}${lastResponseSnippet ? ` — ${lastResponseSnippet}` : ''}`
+      )
     } catch (err) {
       console.error(`[triggerNextStage] Attempt ${attempt + 1} error:`, err)
     }
@@ -66,7 +83,9 @@ export async function triggerNextStage(
       await new Promise((r) => setTimeout(r, delayMs))
     }
   }
-  throw new Error(`Failed to trigger stage "${stage}" after 3 attempts`)
+  throw new Error(
+    `Failed to trigger stage "${stage}" after 3 attempts${lastStatus ? ` (last status ${lastStatus})` : ''}${lastResponseSnippet ? `: ${lastResponseSnippet}` : ''}`
+  )
 }
 
 function getNextStage(current: string, config: PipelineConfig): string | null {
@@ -82,7 +101,36 @@ function getNextStage(current: string, config: PipelineConfig): string | null {
   return idx >= 0 && idx < order.length - 1 ? order[idx + 1] : null
 }
 
-function createRunHelpers(runId: string) {
+function toErrorMessage(err: unknown, fallback = 'Error desconocido'): string {
+  if (err instanceof Error) return err.message
+  if (typeof err === 'string') return err
+  return fallback
+}
+
+async function appendPipelineRunError(
+  runId: string,
+  entry: Omit<PipelineRunErrorLog, 'at'>
+): Promise<void> {
+  const supabase = createServiceClient()
+  const { data } = await supabase
+    .from('pipeline_runs')
+    .select('errors')
+    .eq('id', runId)
+    .single()
+
+  const currentErrors = Array.isArray(data?.errors) ? data.errors : []
+  const nextErrors = [...currentErrors, { ...entry, at: new Date().toISOString() }].slice(-80)
+
+  await supabase
+    .from('pipeline_runs')
+    .update({
+      errors: nextErrors,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', runId)
+}
+
+function createRunHelpers(runId: string, stage: string) {
   const supabase = createServiceClient()
 
   const updateRun = async (updates: Record<string, unknown>) => {
@@ -105,7 +153,42 @@ function createRunHelpers(runId: string) {
     return data?.status === 'cancelled'
   }
 
-  return { supabase, updateRun, updatePipelineLead, isCancelled }
+  const reportError = async (payload: {
+    step: string
+    error: string
+    leadId?: string | null
+    businessName?: string | null
+    code?: string
+    cause?: unknown
+  }) => {
+    const { step, error, leadId, businessName, code, cause } = payload
+    const logPrefix =
+      `[pipeline/error] run=${runId} stage=${stage} step=${step}` +
+      (leadId ? ` lead=${leadId}` : '') +
+      (businessName ? ` business="${businessName}"` : '') +
+      (code ? ` code=${code}` : '')
+
+    if (cause) {
+      console.error(`${logPrefix} :: ${error}`, cause)
+    } else {
+      console.error(`${logPrefix} :: ${error}`)
+    }
+
+    try {
+      await appendPipelineRunError(runId, {
+        stage,
+        step,
+        error,
+        leadId,
+        businessName,
+        code,
+      })
+    } catch (appendErr) {
+      console.error('[pipeline/error] Failed to append pipeline run error log', appendErr)
+    }
+  }
+
+  return { supabase, updateRun, updatePipelineLead, isCancelled, reportError }
 }
 
 // ─── Stage dispatcher ───────────────────────────────────────────────────────────
@@ -146,12 +229,28 @@ export async function processStage(runId: string, stage: string, fromPhase: 'a' 
         break
       default:
         console.error(`[pipeline/stages] Unknown stage: ${stage}`)
+        await appendPipelineRunError(runId, {
+          stage,
+          step: 'unknown_stage',
+          error: `Unknown stage: ${stage}`,
+          code: 'invalid_stage',
+        }).catch((appendErr) =>
+          console.error('[pipeline/error] Failed to append unknown stage error', appendErr)
+        )
     }
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : 'Error desconocido'
+    const errMsg = toErrorMessage(err)
 
     if (isAnthropicRateLimitError(err)) {
       console.warn(`[pipeline/stages] Rate limit in stage ${stage}. Keeping run active for retry.`)
+      await appendPipelineRunError(runId, {
+        stage,
+        step: 'rate_limit_pause',
+        error: errMsg,
+        code: 'rate_limit',
+      }).catch((appendErr) =>
+        console.error('[pipeline/error] Failed to append rate limit error', appendErr)
+      )
       await supabase
         .from('pipeline_runs')
         .update({ status: 'running', updated_at: new Date().toISOString() })
@@ -160,6 +259,14 @@ export async function processStage(runId: string, stage: string, fromPhase: 'a' 
     }
 
     console.error(`[pipeline/stages] Fatal error in stage ${stage}:`, errMsg)
+    await appendPipelineRunError(runId, {
+      stage,
+      step: 'stage_fatal',
+      error: errMsg,
+      code: 'fatal',
+    }).catch((appendErr) =>
+      console.error('[pipeline/error] Failed to append fatal stage error', appendErr)
+    )
     await supabase
       .from('pipeline_runs')
       .update({ status: 'failed', stage: 'error', updated_at: new Date().toISOString() })
@@ -193,7 +300,7 @@ async function advanceOrComplete(
 // ─── Stage: Search ──────────────────────────────────────────────────────────────
 
 async function stageSearch(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
-  const { supabase, updateRun, isCancelled } = createRunHelpers(runId)
+  const { supabase, updateRun, isCancelled } = createRunHelpers(runId, 'search')
 
   await updateRun({ stage: 'searching' })
 
@@ -258,7 +365,7 @@ async function stageSearch(runId: string, config: PipelineConfig, fromPhase: 'a'
 // ─── Stage: Import ──────────────────────────────────────────────────────────────
 
 async function stageImport(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
-  const { supabase, updateRun, isCancelled } = createRunHelpers(runId)
+  const { supabase, updateRun, isCancelled } = createRunHelpers(runId, 'import')
 
   await updateRun({ stage: 'importing' })
 
@@ -331,7 +438,10 @@ async function stageImport(runId: string, config: PipelineConfig, fromPhase: 'a'
 // ─── Stage: Analyze ─────────────────────────────────────────────────────────────
 
 async function stageAnalyze(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
-  const { supabase, updateRun, updatePipelineLead, isCancelled } = createRunHelpers(runId)
+  const { supabase, updateRun, updatePipelineLead, isCancelled, reportError } = createRunHelpers(
+    runId,
+    'analyze'
+  )
 
   await updateRun({ stage: 'analyzing' })
 
@@ -361,6 +471,13 @@ async function stageAnalyze(runId: string, config: PipelineConfig, fromPhase: 'a
     const dbLead = dbLeads.find((l) => l.id === pl.lead_id)
     if (!dbLead?.website) {
       await updatePipelineLead(pl.id, { status: 'error', error: 'Sin website' })
+      await reportError({
+        step: 'lead_precheck',
+        leadId: pl.lead_id,
+        businessName: pl.business_name,
+        error: 'Sin website',
+        code: 'missing_website',
+      })
       return
     }
 
@@ -403,8 +520,15 @@ async function stageAnalyze(runId: string, config: PipelineConfig, fromPhase: 'a
       analyzedCount++
       await updateRun({ analyzed: analyzedCount })
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : 'Error al analizar'
+      const errMsg = toErrorMessage(err, 'Error al analizar')
       await updatePipelineLead(pl.id, { status: 'error', error: errMsg })
+      await reportError({
+        step: 'analyze_lead',
+        leadId: pl.lead_id,
+        businessName: pl.business_name,
+        error: errMsg,
+        cause: err,
+      })
     }
   }
 
@@ -418,7 +542,10 @@ async function stageAnalyze(runId: string, config: PipelineConfig, fromPhase: 'a
 // ─── Stage: Generate Sites ──────────────────────────────────────────────────────
 
 async function stageGenerateSites(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
-  const { supabase, updateRun, updatePipelineLead, isCancelled } = createRunHelpers(runId)
+  const { supabase, updateRun, updatePipelineLead, isCancelled, reportError } = createRunHelpers(
+    runId,
+    'generate_sites'
+  )
 
   await updateRun({ stage: 'generating_sites' })
 
@@ -454,6 +581,13 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
 
       if (!lead) {
         await updatePipelineLead(pl.id, { status: 'error', error: 'Lead no encontrado' })
+        await reportError({
+          step: 'fetch_lead',
+          leadId: pl.lead_id,
+          businessName: pl.business_name,
+          error: 'Lead no encontrado',
+          code: 'lead_not_found',
+        })
         return
       }
 
@@ -576,10 +710,25 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
           status: 'pending',
           error: 'Rate limit de IA. Reintentando automáticamente.',
         })
+        await reportError({
+          step: 'generate_site',
+          leadId: pl.lead_id,
+          businessName: pl.business_name,
+          error: toErrorMessage(err, 'Rate limit de IA'),
+          code: 'rate_limit',
+          cause: err,
+        })
         throw err
       }
-      const errMsg = err instanceof Error ? err.message : 'Error generando sitio'
+      const errMsg = toErrorMessage(err, 'Error generando sitio')
       await updatePipelineLead(pl.id, { status: 'error', error: errMsg })
+      await reportError({
+        step: 'generate_site',
+        leadId: pl.lead_id,
+        businessName: pl.business_name,
+        error: errMsg,
+        cause: err,
+      })
     }
   }
 
@@ -593,7 +742,10 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
 // ─── Stage: Generate Messages ───────────────────────────────────────────────────
 
 async function stageGenerateMessages(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
-  const { supabase, updateRun, updatePipelineLead, isCancelled } = createRunHelpers(runId)
+  const { supabase, updateRun, updatePipelineLead, isCancelled, reportError } = createRunHelpers(
+    runId,
+    'generate_messages'
+  )
 
   await updateRun({ stage: 'generating_messages' })
 
@@ -624,6 +776,13 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig, from
 
       if (!lead) {
         await updatePipelineLead(pl.id, { status: 'error', error: 'Lead no encontrado' })
+        await reportError({
+          step: 'fetch_lead',
+          leadId: pl.lead_id,
+          businessName: pl.business_name,
+          error: 'Lead no encontrado',
+          code: 'lead_not_found',
+        })
         return
       }
 
@@ -648,10 +807,25 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig, from
           status: 'pending',
           error: 'Rate limit de IA. Reintentando automáticamente.',
         })
+        await reportError({
+          step: 'generate_message',
+          leadId: pl.lead_id,
+          businessName: pl.business_name,
+          error: toErrorMessage(err, 'Rate limit de IA'),
+          code: 'rate_limit',
+          cause: err,
+        })
         throw err
       }
-      const errMsg = err instanceof Error ? err.message : 'Error generando mensaje'
+      const errMsg = toErrorMessage(err, 'Error generando mensaje')
       await updatePipelineLead(pl.id, { status: 'error', error: errMsg })
+      await reportError({
+        step: 'generate_message',
+        leadId: pl.lead_id,
+        businessName: pl.business_name,
+        error: errMsg,
+        cause: err,
+      })
     }
   }
 
@@ -667,7 +841,10 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig, from
 // ─── Stage: Send ────────────────────────────────────────────────────────────────
 
 async function stageSend(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
-  const { supabase, updateRun, updatePipelineLead, isCancelled } = createRunHelpers(runId)
+  const { supabase, updateRun, updatePipelineLead, isCancelled, reportError } = createRunHelpers(
+    runId,
+    'send'
+  )
 
   await updateRun({ stage: 'sending' })
 
@@ -728,8 +905,15 @@ async function stageSend(runId: string, config: PipelineConfig, fromPhase: 'a' |
           sentCount++
           await updateRun({ messages_sent: sentCount })
         } catch (err) {
-          const errMsg = err instanceof Error ? err.message : 'Error al enviar'
+          const errMsg = toErrorMessage(err, 'Error al enviar')
           await updatePipelineLead(pl.id, { status: 'error', error: errMsg })
+          await reportError({
+            step: 'send_message',
+            leadId: pl.lead_id,
+            businessName: pl.business_name,
+            error: errMsg,
+            cause: err,
+          })
         }
 
         // Anti-ban delay (4s between messages)
@@ -741,8 +925,14 @@ async function stageSend(runId: string, config: PipelineConfig, fromPhase: 'a' |
       sock.end(undefined)
     } catch (err) {
       if (sock) sock.end(undefined)
-      const errMsg = err instanceof Error ? err.message : 'Error de conexión WhatsApp'
+      const errMsg = toErrorMessage(err, 'Error de conexión WhatsApp')
       console.error('[pipeline/stages] WhatsApp error:', errMsg)
+      await reportError({
+        step: 'whatsapp_connection',
+        error: errMsg,
+        code: 'whatsapp_connection',
+        cause: err,
+      })
       for (const pl of toSend) {
         if (pl.status === 'message_ready' || pl.status === 'sending') {
           await updatePipelineLead(pl.id, { status: 'error', error: errMsg })

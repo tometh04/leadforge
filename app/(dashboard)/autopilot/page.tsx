@@ -350,6 +350,25 @@ export default function AutopilotPage() {
               <Stat label="Errores" value={progress.errors} error />
             </div>
 
+            {state.runErrors.length > 0 && (
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-900/20">
+                <p className="mb-2 text-xs font-semibold text-red-700 dark:text-red-300">
+                  Logs de errores ({state.runErrors.length})
+                </p>
+                <div className="space-y-1">
+                  {state.runErrors
+                    .slice(-8)
+                    .reverse()
+                    .map((err, idx) => (
+                      <p key={`run-error-${idx}`} className="text-xs text-red-700 dark:text-red-300">
+                        [{err.stage ?? 'pipeline'}/{err.step}]
+                        {err.businessName ? ` ${err.businessName}:` : ''} {err.error}
+                      </p>
+                    ))}
+                </div>
+              </div>
+            )}
+
             {state.error && (
               <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
                 {state.error}
@@ -558,6 +577,7 @@ function PipelineHistory({ activeRunId }: { activeRunId: string | null }) {
               {pastRuns.map((run) => {
                 const isExpanded = expandedId === run.id
                 const leads = leadsCache[run.id]
+                const runErrors = Array.isArray(run.errors) ? run.errors : []
                 const endTime = run.completed_at || run.updated_at
                 return (
                   <React.Fragment key={run.id}>
@@ -589,15 +609,38 @@ function PipelineHistory({ activeRunId }: { activeRunId: string | null }) {
                     {isExpanded && (
                       <TableRow>
                         <TableCell colSpan={10} className="bg-muted/30 p-0">
-                          {loadingLeads === run.id ? (
-                            <div className="flex items-center justify-center gap-2 py-6">
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              <span className="text-sm text-muted-foreground">
-                                Cargando leads...
-                              </span>
-                            </div>
-                          ) : leads && leads.length > 0 ? (
-                            <div className="p-4">
+                          <div className="p-4">
+                            {runErrors.length > 0 && (
+                              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-900/20">
+                                <p className="mb-2 text-xs font-semibold text-red-700 dark:text-red-300">
+                                  Logs de errores ({runErrors.length})
+                                </p>
+                                <div className="space-y-1">
+                                  {runErrors
+                                    .slice(-8)
+                                    .reverse()
+                                    .map((err, idx) => (
+                                      <p
+                                        key={`${run.id}-error-${idx}`}
+                                        className="text-xs text-red-700 dark:text-red-300"
+                                      >
+                                        [{err.stage ?? 'pipeline'}/{err.step}]
+                                        {err.businessName ? ` ${err.businessName}:` : ''}{' '}
+                                        {err.error}
+                                      </p>
+                                    ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {loadingLeads === run.id ? (
+                              <div className="flex items-center justify-center gap-2 py-6">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <span className="text-sm text-muted-foreground">
+                                  Cargando leads...
+                                </span>
+                              </div>
+                            ) : leads && leads.length > 0 ? (
                               <Table>
                                 <TableHeader>
                                   <TableRow>
@@ -655,12 +698,12 @@ function PipelineHistory({ activeRunId }: { activeRunId: string | null }) {
                                   ))}
                                 </TableBody>
                               </Table>
-                            </div>
-                          ) : (
-                            <p className="py-6 text-center text-sm text-muted-foreground">
-                              No hay leads para esta ejecución.
-                            </p>
-                          )}
+                            ) : (
+                              <p className="py-6 text-center text-sm text-muted-foreground">
+                                No hay leads para esta ejecución.
+                              </p>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     )}

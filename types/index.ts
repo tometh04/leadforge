@@ -87,7 +87,15 @@ export interface PipelineRun {
   analyzed: number
   sites_generated: number
   messages_sent: number
-  errors: Array<{ leadId: string; step: string; error: string }>
+  errors: Array<{
+    at?: string
+    stage?: string
+    leadId?: string | null
+    businessName?: string | null
+    step: string
+    error: string
+    code?: string
+  }>
   completed_at: string | null
   updated_at: string
 }

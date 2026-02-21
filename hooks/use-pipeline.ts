@@ -1,7 +1,7 @@
 'use client'
 
 import { useReducer, useRef, useCallback, useEffect } from 'react'
-import type { PipelineStage, PipelineLeadState, PipelineLeadRow } from '@/types'
+import type { PipelineStage, PipelineLeadState, PipelineLeadRow, PipelineRun } from '@/types'
 
 interface PipelineConfig {
   niche: string
@@ -16,6 +16,7 @@ interface PipelineConfig {
 interface PipelineState {
   stage: PipelineStage
   leads: PipelineLeadState[]
+  runErrors: PipelineRun['errors']
   runId: string | null
   progress: {
     searched: number
@@ -34,7 +35,13 @@ type PipelineAction =
   | { type: 'START'; runId: string }
   | { type: 'SET_STAGE'; stage: PipelineStage }
   | { type: 'SET_LEADS'; leads: PipelineLeadState[] }
-  | { type: 'SYNC'; stage: PipelineStage; leads: PipelineLeadState[]; progress: PipelineState['progress'] }
+  | {
+      type: 'SYNC'
+      stage: PipelineStage
+      leads: PipelineLeadState[]
+      runErrors: PipelineRun['errors']
+      progress: PipelineState['progress']
+    }
   | { type: 'SET_ERROR'; error: string }
   | { type: 'DONE'; stage: PipelineStage }
   | { type: 'RESUMING'; runId: string }
@@ -43,6 +50,7 @@ type PipelineAction =
 const initialState: PipelineState = {
   stage: 'idle',
   leads: [],
+  runErrors: [],
   runId: null,
   progress: {
     searched: 0,
@@ -70,6 +78,7 @@ function reducer(state: PipelineState, action: PipelineAction): PipelineState {
         ...state,
         stage: action.stage,
         leads: action.leads,
+        runErrors: action.runErrors,
         progress: action.progress,
         resuming: false,
       }
@@ -149,6 +158,7 @@ export function usePipeline() {
         type: 'SYNC',
         stage: (run.stage as PipelineStage) || 'searching',
         leads: leadStates,
+        runErrors: Array.isArray(run.errors) ? (run.errors as PipelineRun['errors']) : [],
         progress: {
           searched: 0,
           imported: leadStates.length,
