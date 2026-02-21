@@ -40,11 +40,24 @@ export async function triggerNextStage(runId: string, stage: string) {
   const baseUrl =
     process.env.NEXT_PUBLIC_APP_URL ??
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
-  await fetch(`${baseUrl}/api/pipeline/run/continue`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ runId, stage }),
-  })
+  const url = `${baseUrl}/api/pipeline/run/continue`
+  const body = JSON.stringify({ runId, stage })
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      })
+      if (res.ok) return
+      console.error(`[triggerNextStage] Attempt ${attempt + 1} failed: ${res.status}`)
+    } catch (err) {
+      console.error(`[triggerNextStage] Attempt ${attempt + 1} error:`, err)
+    }
+    if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
+  }
+  throw new Error(`Failed to trigger stage "${stage}" after 3 attempts`)
 }
 
 function getNextStage(current: string, config: PipelineConfig): string | null {
