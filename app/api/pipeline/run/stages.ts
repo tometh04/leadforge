@@ -222,6 +222,9 @@ export async function processStage(runId: string, stage: string, fromPhase: 'a' 
 
   const config = run.config as PipelineConfig
 
+  const t0 = Date.now()
+  console.log(`[pipeline/stages] ${stage} DISPATCH START run=${runId}`)
+
   try {
     switch (stage) {
       case 'search':
@@ -257,7 +260,7 @@ export async function processStage(runId: string, stage: string, fromPhase: 'a' 
     const errMsg = toErrorMessage(err)
 
     if (isAnthropicRateLimitError(err)) {
-      console.warn(`[pipeline/stages] Rate limit in stage ${stage}. Keeping run active for retry.`)
+      console.warn(`[pipeline/stages] ${stage} RATE_LIMIT run=${runId} elapsed=${Date.now() - t0}ms`)
       await appendPipelineRunError(runId, {
         stage,
         step: 'rate_limit_pause',
@@ -273,7 +276,7 @@ export async function processStage(runId: string, stage: string, fromPhase: 'a' 
       return
     }
 
-    console.error(`[pipeline/stages] Fatal error in stage ${stage}:`, errMsg)
+    console.error(`[pipeline/stages] ${stage} FATAL run=${runId} elapsed=${Date.now() - t0}ms error=${errMsg}`)
     await appendPipelineRunError(runId, {
       stage,
       step: 'stage_fatal',
@@ -318,11 +321,14 @@ async function stageSearch(runId: string, config: PipelineConfig, fromPhase: 'a'
   const { supabase, updateRun, isCancelled } = createRunHelpers(runId, 'search')
 
   await updateRun({ stage: 'searching' })
+  const t0 = Date.now()
+  console.log(`[pipeline/stages] search START run=${runId}`)
 
   const fetchCount = Math.min(config.maxResults * 2, 60)
   const places = await searchPlaces(config.niche, config.city, fetchCount)
 
   if (places.length === 0) {
+    console.log(`[pipeline/stages] search END run=${runId} elapsed=${Date.now() - t0}ms results=0 (no places)`)
     await updateRun({ status: 'completed', stage: 'done', completed_at: new Date().toISOString() })
     return
   }
@@ -359,6 +365,7 @@ async function stageSearch(runId: string, config: PipelineConfig, fromPhase: 'a'
     .slice(0, config.maxResults)
 
   if (viableResults.length === 0) {
+    console.log(`[pipeline/stages] search END run=${runId} elapsed=${Date.now() - t0}ms results=0 (no viable)`)
     await updateRun({ status: 'completed', stage: 'done', completed_at: new Date().toISOString() })
     return
   }
@@ -374,6 +381,7 @@ async function stageSearch(runId: string, config: PipelineConfig, fromPhase: 'a'
 
   if (await isCancelled()) return
 
+  console.log(`[pipeline/stages] search END run=${runId} elapsed=${Date.now() - t0}ms viable=${viableResults.length}`)
   await advanceOrComplete(runId, 'search', config, fromPhase)
 }
 
@@ -383,6 +391,8 @@ async function stageImport(runId: string, config: PipelineConfig, fromPhase: 'a'
   const { supabase, updateRun, isCancelled } = createRunHelpers(runId, 'import')
 
   await updateRun({ stage: 'importing' })
+  const t0 = Date.now()
+  console.log(`[pipeline/stages] import START run=${runId}`)
 
   // Read search results stored by the search stage
   const { data: run } = await supabase
@@ -394,6 +404,7 @@ async function stageImport(runId: string, config: PipelineConfig, fromPhase: 'a'
   const viableResults: ScraperResult[] = (run?.search_results as ScraperResult[]) ?? []
 
   if (viableResults.length === 0) {
+    console.log(`[pipeline/stages] import END run=${runId} elapsed=${Date.now() - t0}ms imported=0 (no results)`)
     await updateRun({ status: 'completed', stage: 'done', completed_at: new Date().toISOString() })
     return
   }
@@ -447,6 +458,7 @@ async function stageImport(runId: string, config: PipelineConfig, fromPhase: 'a'
 
   if (await isCancelled()) return
 
+  console.log(`[pipeline/stages] import END run=${runId} elapsed=${Date.now() - t0}ms imported=${pLeads.length}`)
   await advanceOrComplete(runId, 'import', config, fromPhase)
 }
 
@@ -459,6 +471,8 @@ async function stageAnalyze(runId: string, config: PipelineConfig, fromPhase: 'a
   )
 
   await updateRun({ stage: 'analyzing' })
+  const t0 = Date.now()
+  console.log(`[pipeline/stages] analyze START run=${runId}`)
 
   const { data: pLeads } = await supabase
     .from('pipeline_leads')
@@ -497,6 +511,7 @@ async function stageAnalyze(runId: string, config: PipelineConfig, fromPhase: 'a
     }
 
     await updatePipelineLead(pl.id, { status: 'analyzing' })
+    const lt0 = Date.now()
 
     try {
       const scraped = await scrapeSite(dbLead.website)
@@ -534,7 +549,9 @@ async function stageAnalyze(runId: string, config: PipelineConfig, fromPhase: 'a
       await updatePipelineLead(pl.id, { status: 'analyzed', score })
       analyzedCount++
       await updateRun({ analyzed: analyzedCount })
+      console.log(`[pipeline/stages] analyze lead="${pl.business_name}" elapsed=${Date.now() - lt0}ms score=${score}`)
     } catch (err) {
+      console.log(`[pipeline/stages] analyze lead="${pl.business_name}" elapsed=${Date.now() - lt0}ms ERROR`)
       const errMsg = toErrorMessage(err, 'Error al analizar')
       await updatePipelineLead(pl.id, { status: 'error', error: errMsg })
       await reportError({
@@ -551,6 +568,7 @@ async function stageAnalyze(runId: string, config: PipelineConfig, fromPhase: 'a
 
   if (cancelled) return
 
+  console.log(`[pipeline/stages] analyze END run=${runId} elapsed=${Date.now() - t0}ms analyzed=${analyzedCount}`)
   await advanceOrComplete(runId, 'analyze', config, fromPhase)
 }
 
@@ -565,6 +583,8 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
   )
 
   await updateRun({ stage: 'generating_sites' })
+  const t0 = Date.now()
+  console.log(`[pipeline/stages] generate_sites START run=${runId}`)
 
   const { data: allPLeads } = await supabase
     .from('pipeline_leads')
@@ -573,6 +593,9 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
 
   // Reset orphaned leads from a killed previous execution
   const orphaned = (allPLeads ?? []).filter((pl) => pl.status === 'generating_site')
+  if (orphaned.length > 0) {
+    console.log(`[pipeline/stages] generate_sites reset ${orphaned.length} orphaned leads run=${runId}`)
+  }
   for (const pl of orphaned) {
     await updatePipelineLead(pl.id, { status: 'analyzed', error: null })
     // Also update the in-memory array so the rest of the function sees correct statuses
@@ -607,6 +630,7 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
     }
 
     await updatePipelineLead(pl.id, { status: 'generating_site', error: null })
+    const lt0 = Date.now()
 
     try {
       const { data: lead } = await supabase
@@ -742,6 +766,7 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
       await updatePipelineLead(pl.id, { status: 'site_generated', site_url: previewUrl })
       sitesCount++
       await updateRun({ sites_generated: sitesCount })
+      console.log(`[pipeline/stages] generate_sites lead="${pl.business_name}" elapsed=${Date.now() - lt0}ms`)
     } catch (err) {
       if (isAnthropicRateLimitError(err)) {
         await updatePipelineLead(pl.id, {
@@ -758,6 +783,7 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
         })
         throw err
       }
+      console.log(`[pipeline/stages] generate_sites lead="${pl.business_name}" elapsed=${Date.now() - lt0}ms ERROR`)
       const errMsg = toErrorMessage(err, 'Error generando sitio')
       await updatePipelineLead(pl.id, { status: 'error', error: errMsg })
       await reportError({
@@ -789,9 +815,11 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
   ).length
 
   if (stillPending > 0) {
+    console.log(`[pipeline/stages] generate_sites BATCH END run=${runId} elapsed=${Date.now() - t0}ms sites=${sitesCount} stillPending=${stillPending}`)
     // Self-chain: trigger the same stage again for the next batch
     await triggerNextStage(runId, 'generate_sites', fromPhase)
   } else {
+    console.log(`[pipeline/stages] generate_sites END run=${runId} elapsed=${Date.now() - t0}ms sites=${sitesCount}`)
     await advanceOrComplete(runId, 'generate_sites', config, fromPhase)
   }
 }
@@ -805,6 +833,8 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig, from
   )
 
   await updateRun({ stage: 'generating_messages' })
+  const t0 = Date.now()
+  console.log(`[pipeline/stages] generate_messages START run=${runId}`)
 
   const { data: freshPLeads } = await supabase
     .from('pipeline_leads')
@@ -823,6 +853,7 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig, from
     if (pl.status === 'skipped' || pl.status === 'error') return
 
     await updatePipelineLead(pl.id, { status: 'generating_message', error: null })
+    const lt0 = Date.now()
 
     try {
       const { data: lead } = await supabase
@@ -858,6 +889,7 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig, from
 
       await updatePipelineLead(pl.id, { status: 'message_ready', message })
       messagesCount++
+      console.log(`[pipeline/stages] generate_messages lead="${pl.business_name}" elapsed=${Date.now() - lt0}ms`)
     } catch (err) {
       if (isAnthropicRateLimitError(err)) {
         await updatePipelineLead(pl.id, {
@@ -874,6 +906,7 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig, from
         })
         throw err
       }
+      console.log(`[pipeline/stages] generate_messages lead="${pl.business_name}" elapsed=${Date.now() - lt0}ms ERROR`)
       const errMsg = toErrorMessage(err, 'Error generando mensaje')
       await updatePipelineLead(pl.id, { status: 'error', error: errMsg })
       await reportError({
@@ -892,6 +925,7 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig, from
 
   await updateRun({ messages_sent: messagesCount })
 
+  console.log(`[pipeline/stages] generate_messages END run=${runId} elapsed=${Date.now() - t0}ms messages=${messagesCount}`)
   await advanceOrComplete(runId, 'generate_messages', config, fromPhase)
 }
 
@@ -904,6 +938,8 @@ async function stageSend(runId: string, config: PipelineConfig, fromPhase: 'a' |
   )
 
   await updateRun({ stage: 'sending' })
+  const t0 = Date.now()
+  console.log(`[pipeline/stages] send START run=${runId}`)
 
   const { data: freshPLeads } = await supabase
     .from('pipeline_leads')
@@ -932,6 +968,7 @@ async function stageSend(runId: string, config: PipelineConfig, fromPhase: 'a' |
 
         const pl = toSend[i]
         await updatePipelineLead(pl.id, { status: 'sending' })
+        const mt0 = Date.now()
 
         try {
           const jid = formatPhoneToJid(pl.phone)
@@ -961,6 +998,7 @@ async function stageSend(runId: string, config: PipelineConfig, fromPhase: 'a' |
           await updatePipelineLead(pl.id, { status: 'sent' })
           sentCount++
           await updateRun({ messages_sent: sentCount })
+          console.log(`[pipeline/stages] send lead="${pl.business_name}" elapsed=${Date.now() - mt0}ms`)
         } catch (err) {
           const errMsg = toErrorMessage(err, 'Error al enviar')
           await updatePipelineLead(pl.id, { status: 'error', error: errMsg })
@@ -983,7 +1021,7 @@ async function stageSend(runId: string, config: PipelineConfig, fromPhase: 'a' |
     } catch (err) {
       if (sock) sock.end(undefined)
       const errMsg = toErrorMessage(err, 'Error de conexión WhatsApp')
-      console.error('[pipeline/stages] WhatsApp error:', errMsg)
+      console.error(`[pipeline/stages] send WhatsApp error run=${runId} elapsed=${Date.now() - t0}ms error=${errMsg}`)
       await reportError({
         step: 'whatsapp_connection',
         error: errMsg,
@@ -998,5 +1036,6 @@ async function stageSend(runId: string, config: PipelineConfig, fromPhase: 'a' |
     }
   }
 
+  console.log(`[pipeline/stages] send END run=${runId} elapsed=${Date.now() - t0}ms sent=${sentCount}`)
   await advanceOrComplete(runId, 'send', config, fromPhase)
 }

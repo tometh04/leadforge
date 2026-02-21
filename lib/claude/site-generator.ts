@@ -193,11 +193,18 @@ Generá el HTML completo ahora. Sin explicaciones, sin markdown, sin bloques de 
   const message = await withAnthropicRateLimitRetry('generateSiteHTML', async () => {
     const stream = anthropic.messages.stream({
       model: 'claude-sonnet-4-6',
-      max_tokens: 16000,
+      max_tokens: 32000,
       messages: [{ role: 'user', content: prompt }],
     })
     return stream.finalMessage()
   })
+  if (message.stop_reason === 'max_tokens') {
+    console.warn(
+      `[site-generator] Output truncated (hit max_tokens). ` +
+        `usage: input=${message.usage.input_tokens} output=${message.usage.output_tokens}`
+    )
+  }
+
   const text = message.content[0].type === 'text' ? message.content[0].text : ''
 
   // Extraer el HTML de la respuesta
