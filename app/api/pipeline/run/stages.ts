@@ -303,12 +303,6 @@ async function stageAnalyze(runId: string, config: PipelineConfig) {
     .select('*')
     .eq('run_id', runId)
 
-  const { data: runData } = await supabase
-    .from('pipeline_runs')
-    .select('search_results')
-    .eq('id', runId)
-    .single()
-
   // Fetch all lead data we need
   const leadIds = (pLeads ?? []).map((pl) => pl.lead_id).filter(Boolean)
   const { data: dbLeadsRaw } = await supabase
