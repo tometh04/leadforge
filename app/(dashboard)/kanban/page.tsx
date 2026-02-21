@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd'
 import { Lead, LeadActivity, LeadStatus } from '@/types'
 import { ScoreBadge } from '@/components/leads/ScoreBadge'
@@ -35,6 +35,20 @@ export default function KanbanPage() {
   const [generatingSite, setGeneratingSite] = useState<Set<string>>(new Set())
   const [whatsappLead, setWhatsappLead] = useState<Lead | null>(null)
   const [bulkAnalyzing, setBulkAnalyzing] = useState(false)
+
+  // AbortControllers for long-running requests
+  const analyzeControllerRef = useRef<AbortController | null>(null)
+  const bulkAnalyzeControllerRef = useRef<AbortController | null>(null)
+  const generateSiteControllersRef = useRef<Map<string, AbortController>>(new Map())
+
+  // Cleanup: abort all in-flight requests on unmount
+  useEffect(() => {
+    return () => {
+      analyzeControllerRef.current?.abort()
+      bulkAnalyzeControllerRef.current?.abort()
+      generateSiteControllersRef.current.forEach((c) => c.abort())
+    }
+  }, [])
 
   const fetchLeads = useCallback(async () => {
     setLoading(true)
@@ -97,9 +111,12 @@ export default function KanbanPage() {
 
   /* ── ANALYZE ── */
   const handleAnalyze = async (lead: Lead) => {
+    analyzeControllerRef.current?.abort()
+    const controller = new AbortController()
+    analyzeControllerRef.current = controller
     setAnalyzing(lead.id)
     try {
-      const res = await fetch(`/api/analyze/${lead.id}`, { method: 'POST' })
+      const res = await fetch(`/api/analyze/${lead.id}`, { method: 'POST', signal: controller.signal })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
 
@@ -118,6 +135,7 @@ export default function KanbanPage() {
         setActivity(await actRes.json())
       }
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
       toast.error(err instanceof Error ? err.message : 'Error al analizar')
     } finally {
       setAnalyzing(null)
@@ -128,27 +146,40 @@ export default function KanbanPage() {
   const handleBulkAnalyze = async () => {
     const pending = leads.filter((l) => !l.score && l.status === 'nuevo')
     if (pending.length === 0) { toast.info('No hay leads nuevos sin analizar'); return }
+    bulkAnalyzeControllerRef.current?.abort()
+    const controller = new AbortController()
+    bulkAnalyzeControllerRef.current = controller
     setBulkAnalyzing(true)
     toast.info(`Analizando ${pending.length} leads...`)
     let done = 0
     for (const lead of pending) {
-      try { await fetch(`/api/analyze/${lead.id}`, { method: 'POST' }); done++ } catch { /* continuar */ }
+      if (controller.signal.aborted) break
+      try { await fetch(`/api/analyze/${lead.id}`, { method: 'POST', signal: controller.signal }); done++ } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') break
+      }
     }
-    toast.success(`✅ ${done}/${pending.length} leads analizados`)
+    if (!controller.signal.aborted) {
+      toast.success(`${done}/${pending.length} leads analizados`)
+    }
     setBulkAnalyzing(false)
     fetchLeads()
   }
 
   /* ── GENERATE SITE ── */
   const handleGenerateSite = (lead: Lead) => {
+    // Abort any existing request for this lead
+    generateSiteControllersRef.current.get(lead.id)?.abort()
+    const controller = new AbortController()
+    generateSiteControllersRef.current.set(lead.id, controller)
+
     setGeneratingSite((prev) => new Set(prev).add(lead.id))
     toast.info(`Generando sitio para ${lead.business_name}...`)
 
-    fetch(`/api/generate-site/${lead.id}`, { method: 'POST' })
+    fetch(`/api/generate-site/${lead.id}`, { method: 'POST', signal: controller.signal })
       .then(async (res) => {
         const data = await res.json()
         if (!res.ok) throw new Error(data.error)
-        toast.success(`🌐 Sitio generado para ${lead.business_name}`)
+        toast.success(`Sitio generado para ${lead.business_name}`)
 
         const leadRes = await fetch(`/api/leads/${lead.id}`)
         const updated = await leadRes.json()
@@ -160,9 +191,11 @@ export default function KanbanPage() {
         }
       })
       .catch((err) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return
         toast.error(err instanceof Error ? err.message : 'Error al generar sitio')
       })
       .finally(() => {
+        generateSiteControllersRef.current.delete(lead.id)
         setGeneratingSite((prev) => {
           const next = new Set(prev)
           next.delete(lead.id)
