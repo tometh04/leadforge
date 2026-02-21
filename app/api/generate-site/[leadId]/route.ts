@@ -60,8 +60,19 @@ export async function POST(
         : undefined
 
     // 2b. Si los datos scrapeados están vacíos/insuficientes, re-scrapear el sitio
+    const NON_STORE_DOMAINS = [
+      'instagram.com', 'facebook.com', 'tiktok.com', 'twitter.com', 'x.com',
+      'youtube.com', 'linkedin.com',
+      'linktree', 'linktr.ee', 'bio.link', 'beacons.ai', 'taplink', 'direct.me',
+      'drive.google', 'docs.google',
+    ]
+    const NON_STORE_SITE_TYPES = ['social_redirect', 'link_in_bio', 'menu_only']
+    const urlLower = (lead.website ?? '').toLowerCase()
+    const isNonStoreUrl = NON_STORE_DOMAINS.some(d => urlLower.includes(d))
+    const isNonStoreSiteType = NON_STORE_SITE_TYPES.includes(existingDetails.site_type as string)
+
     let freshScrapedDetails: Record<string, unknown> | null = null
-    if ((!scrapedData?.visibleText || scrapedData.visibleText.length < 50) && lead.website) {
+    if ((!scrapedData?.visibleText || scrapedData.visibleText.length < 50) && lead.website && !isNonStoreUrl && !isNonStoreSiteType) {
       try {
         console.log('[generate-site] Datos scrapeados insuficientes, re-scrapeando:', lead.website)
         const fresh = await scrapeSite(lead.website)
