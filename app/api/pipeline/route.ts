@@ -5,8 +5,8 @@ export async function GET() {
   try {
     const supabase = await createClient()
 
-    // Auto-fail runs stuck for more than 6 minutes (no updated_at progress)
-    const sixMinAgo = new Date(Date.now() - 6 * 60 * 1000).toISOString()
+    // Auto-fail runs stuck for more than 20 minutes (no updated_at progress)
+    const sixMinAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString()
     const { data: staleRuns } = await supabase
       .from('pipeline_runs')
       .select('id, stage, errors')
@@ -23,7 +23,7 @@ export async function GET() {
             at: nowIso,
             stage: typeof run.stage === 'string' ? run.stage : 'pipeline',
             step: 'stale_timeout',
-            error: 'Run auto-marcado como fallido por inactividad (> 6 minutos).',
+            error: 'Run auto-marcado como fallido por inactividad (> 20 minutos).',
             code: 'stale_timeout',
           },
         ].slice(-80)

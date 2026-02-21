@@ -132,7 +132,8 @@ export default function KanbanPage() {
       if (selectedLead?.id === lead.id) {
         setSelectedLead((prev) => prev ? { ...prev, ...patch } : prev)
         const actRes = await fetch(`/api/leads/${lead.id}/activity`)
-        setActivity(await actRes.json())
+        const actData = await actRes.json()
+        setActivity(Array.isArray(actData) ? actData : [])
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return
@@ -187,7 +188,8 @@ export default function KanbanPage() {
         if (selectedLead?.id === lead.id) {
           setSelectedLead(updated)
           const actRes = await fetch(`/api/leads/${lead.id}/activity`)
-          setActivity(await actRes.json())
+          const actData = await actRes.json()
+          setActivity(Array.isArray(actData) ? actData : [])
         }
       })
       .catch((err) => {

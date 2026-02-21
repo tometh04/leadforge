@@ -575,8 +575,6 @@ async function stageAnalyze(runId: string, config: PipelineConfig, fromPhase: 'a
 // ─── Stage: Generate Sites ──────────────────────────────────────────────────────
 
 async function stageGenerateSites(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
-  const SITE_GEN_BATCH_SIZE = 2
-
   const { supabase, updateRun, updatePipelineLead, isCancelled, reportError } = createRunHelpers(
     runId,
     'generate_sites'
@@ -598,22 +596,18 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
   }
   for (const pl of orphaned) {
     await updatePipelineLead(pl.id, { status: 'analyzed', error: null })
-    // Also update the in-memory array so the rest of the function sees correct statuses
     pl.status = 'analyzed'
   }
 
-  // Count already-generated sites so the counter stays accurate across batches
+  // Count already-generated sites so the counter stays accurate
   const alreadyGenerated = (allPLeads ?? []).filter(
     (pl) => pl.status === 'site_generated'
   ).length
 
-  // Only pick leads that still need processing
+  // Process all pending leads (no batching needed on Railway — no serverless timeout)
   const pendingLeads = (allPLeads ?? []).filter(
     (pl) => pl.status !== 'site_generated' && pl.status !== 'skipped' && pl.status !== 'error'
   )
-
-  // Take only a batch to stay within Vercel's timeout
-  const batch = pendingLeads.slice(0, SITE_GEN_BATCH_SIZE)
 
   let sitesCount = alreadyGenerated
   let cancelled = false
@@ -630,6 +624,8 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
     }
 
     await updatePipelineLead(pl.id, { status: 'generating_site', error: null })
+    // Heartbeat: refresh updated_at so the stale-run detector doesn't kill us
+    await updateRun({})
     const lt0 = Date.now()
 
     try {
@@ -796,32 +792,12 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
     }
   }
 
-  await pMap(batch, processLead, 1)
+  await pMap(pendingLeads, processLead, 1)
 
   if (cancelled) return
 
-  // Re-query remaining leads from DB after batch completes (pre-batch counts are stale)
-  const { data: freshAfterBatch } = await supabase
-    .from('pipeline_leads')
-    .select('id, status')
-    .eq('run_id', runId)
-
-  const stillPending = (freshAfterBatch ?? []).filter(
-    (pl) =>
-      pl.status !== 'site_generated' &&
-      pl.status !== 'skipped' &&
-      pl.status !== 'error' &&
-      pl.status !== 'generating_site'
-  ).length
-
-  if (stillPending > 0) {
-    console.log(`[pipeline/stages] generate_sites BATCH END run=${runId} elapsed=${Date.now() - t0}ms sites=${sitesCount} stillPending=${stillPending}`)
-    // Self-chain: trigger the same stage again for the next batch
-    await triggerNextStage(runId, 'generate_sites', fromPhase)
-  } else {
-    console.log(`[pipeline/stages] generate_sites END run=${runId} elapsed=${Date.now() - t0}ms sites=${sitesCount}`)
-    await advanceOrComplete(runId, 'generate_sites', config, fromPhase)
-  }
+  console.log(`[pipeline/stages] generate_sites END run=${runId} elapsed=${Date.now() - t0}ms sites=${sitesCount}`)
+  await advanceOrComplete(runId, 'generate_sites', config, fromPhase)
 }
 
 // ─── Stage: Generate Messages ───────────────────────────────────────────────────
