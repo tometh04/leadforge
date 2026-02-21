@@ -90,32 +90,73 @@ export function waitForConnection(
 }
 
 /**
- * Convierte un número de teléfono argentino a JID de WhatsApp.
- * Acepta formatos: +54 9 11 1234-5678, 5491112345678, 011-1234-5678, etc.
+ * Códigos de país conocidos (de mayor a menor longitud para matching correcto).
+ * Cubre los principales mercados de LATAM + España.
+ */
+const COUNTRY_CODES = [
+  '549', // Argentina móvil (54 + 9)
+  '54',  // Argentina
+  '55',  // Brasil
+  '56',  // Chile
+  '57',  // Colombia
+  '58',  // Venezuela
+  '52',  // México
+  '51',  // Perú
+  '53',  // Cuba
+  '506', // Costa Rica
+  '507', // Panamá
+  '502', // Guatemala
+  '503', // El Salvador
+  '504', // Honduras
+  '505', // Nicaragua
+  '591', // Bolivia
+  '593', // Ecuador
+  '595', // Paraguay
+  '598', // Uruguay
+  '34',  // España
+  '1',   // USA / Canadá
+]
+
+/**
+ * Detecta si el número ya tiene un código de país conocido.
+ */
+function detectCountryCode(digits: string): string | null {
+  // Revisar códigos de 3 dígitos primero, luego 2, luego 1
+  for (const code of COUNTRY_CODES) {
+    if (digits.startsWith(code)) return code
+  }
+  return null
+}
+
+/**
+ * Convierte un número de teléfono a JID de WhatsApp.
+ * Respeta el código de país si el número ya lo incluye (+34, +54, +52, etc.).
+ * Si no tiene código de país, asume Argentina (+549) como fallback.
  */
 export function formatPhoneToJid(phone: string): string {
-  // Limpiar todo excepto dígitos
   let digits = phone.replace(/\D/g, '')
 
-  // Si empieza con 0 (número local argentino), quitar el 0 y agregar 549
+  // Número local argentino (empieza con 0): quitar 0 y agregar 549
   if (digits.startsWith('0')) {
     digits = '549' + digits.slice(1)
   }
 
-  // Si empieza con 54 pero no con 549, insertar el 9 (celular)
-  if (digits.startsWith('54') && !digits.startsWith('549')) {
+  const countryCode = detectCountryCode(digits)
+
+  if (!countryCode) {
+    // Sin código de país reconocido → asumir Argentina móvil
+    digits = '549' + digits
+  } else if (countryCode === '54' && !digits.startsWith('549')) {
+    // Argentina fijo (54) → insertar 9 para móvil
     digits = '549' + digits.slice(2)
   }
 
-  // Si no empieza con código de país, asumir Argentina
-  if (!digits.startsWith('54')) {
-    digits = '549' + digits
-  }
-
-  // Eliminar 15 del número local (ej: 11-15-1234-5678 → 11-1234-5678)
-  const match = digits.match(/^549(\d{2,4})15(\d{4,8})$/)
-  if (match) {
-    digits = `549${match[1]}${match[2]}`
+  // Argentina: eliminar 15 del número local (ej: 549-11-15-1234-5678 → 549-11-1234-5678)
+  if (digits.startsWith('549')) {
+    const match = digits.match(/^549(\d{2,4})15(\d{4,8})$/)
+    if (match) {
+      digits = `549${match[1]}${match[2]}`
+    }
   }
 
   return `${digits}@s.whatsapp.net`
