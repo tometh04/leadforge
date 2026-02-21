@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { generateSiteHTML, slugify, ScrapedBusinessData } from '@/lib/claude/site-generator'
 import { fetchPlaceDetails } from '@/lib/google-places/client'
+import { scrapeSite } from '@/lib/scraper/site-scraper'
 
 export async function POST(
   _req: NextRequest,
@@ -40,7 +41,7 @@ export async function POST(
       return true
     })
 
-    const scrapedData: ScrapedBusinessData | undefined = existingDetails.visible_text
+    let scrapedData: ScrapedBusinessData | undefined = existingDetails.visible_text
       ? {
           visibleText: existingDetails.visible_text as string,
           imageUrls: filteredImages,
@@ -57,6 +58,51 @@ export async function POST(
       : lead.google_photo_url
         ? { googlePhotoUrl: lead.google_photo_url }
         : undefined
+
+    // 2b. Si los datos scrapeados están vacíos/insuficientes, re-scrapear el sitio
+    let freshScrapedDetails: Record<string, unknown> | null = null
+    if ((!scrapedData?.visibleText || scrapedData.visibleText.length < 50) && lead.website) {
+      try {
+        console.log('[generate-site] Datos scrapeados insuficientes, re-scrapeando:', lead.website)
+        const fresh = await scrapeSite(lead.website)
+        if (fresh.visibleText && fresh.visibleText.length >= 50) {
+          const freshImages = fresh.imageUrls.filter((url: string) => {
+            const u = url.toLowerCase()
+            if (fresh.logoUrl && u === fresh.logoUrl.toLowerCase()) return false
+            if (ICON_URL_KEYWORDS.some(kw => u.includes(kw))) return false
+            return true
+          })
+          scrapedData = {
+            visibleText: fresh.visibleText,
+            imageUrls: freshImages,
+            logoUrl: fresh.logoUrl,
+            socialLinks: fresh.socialLinks,
+            siteType: fresh.siteType,
+            googlePhotoUrl: lead.google_photo_url ?? null,
+            emails: fresh.emails,
+            pageTitle: fresh.title,
+            metaDescription: fresh.description,
+            subPagesText: fresh.subPagesText,
+            subPagesCount: fresh.subPagesCount,
+          }
+          // Guardar campos frescos para actualizar score_details después
+          freshScrapedDetails = {
+            visible_text: fresh.visibleText,
+            scraped_images: fresh.imageUrls,
+            logo_url: fresh.logoUrl,
+            social_links: fresh.socialLinks,
+            site_type: fresh.siteType,
+            emails: fresh.emails,
+            page_title: fresh.title,
+            meta_description: fresh.description,
+            sub_pages_text: fresh.subPagesText,
+            sub_pages_count: fresh.subPagesCount,
+          }
+        }
+      } catch (e) {
+        console.warn('[generate-site] Re-scrape falló:', e)
+      }
+    }
 
     // 3. Obtener horarios reales + review count de Google Places API
     let openingHours: string[] | null = null
@@ -78,11 +124,12 @@ export async function POST(
     }
 
     // 4. Preparar imágenes para Claude
+    const effectiveLogoUrl = scrapedData?.logoUrl ?? rawLogoUrl
     const allImageUrls: string[] = []
     if (scrapedData?.googlePhotoUrl) allImageUrls.push(scrapedData.googlePhotoUrl)
     if (scrapedData?.imageUrls) {
       for (const url of scrapedData.imageUrls) {
-        if (!allImageUrls.includes(url) && url !== rawLogoUrl) {
+        if (!allImageUrls.includes(url) && url !== effectiveLogoUrl) {
           allImageUrls.push(url)
         }
       }
@@ -99,7 +146,7 @@ export async function POST(
       googleReviewCount,
       openingHours,
       imageUrls: allImageUrls,
-      logoUrl: rawLogoUrl,
+      logoUrl: effectiveLogoUrl,
     })
 
     // 6. Generar slug único
@@ -117,6 +164,7 @@ export async function POST(
         status: 'sitio_generado',
         score_details: {
           ...scoreOnly,
+          ...(freshScrapedDetails ?? {}),
           site_html: html,
           site_slug: slug,
           ...(openingHours ? { opening_hours: openingHours } : {}),
