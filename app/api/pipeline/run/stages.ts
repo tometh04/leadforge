@@ -36,11 +36,16 @@ export async function pMap<T>(
   await Promise.all(workers)
 }
 
-export async function triggerNextStage(runId: string, stage: string) {
+export async function triggerNextStage(
+  runId: string,
+  stage: string,
+  fromPhase: 'a' | 'b' | 'init' = 'init'
+) {
+  const nextPhase = fromPhase === 'a' ? 'b' : 'a'
   const baseUrl =
     process.env.NEXT_PUBLIC_APP_URL ??
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000')
-  const url = `${baseUrl}/api/pipeline/run/continue`
+  const url = `${baseUrl}/api/pipeline/run/continue-${nextPhase}`
   const body = JSON.stringify({ runId, stage })
 
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -101,7 +106,7 @@ function createRunHelpers(runId: string) {
 
 // ─── Stage dispatcher ───────────────────────────────────────────────────────────
 
-export async function processStage(runId: string, stage: string) {
+export async function processStage(runId: string, stage: string, fromPhase: 'a' | 'b' | 'init' = 'init') {
   const supabase = createServiceClient()
 
   // Fetch config from the pipeline_runs row
@@ -118,22 +123,22 @@ export async function processStage(runId: string, stage: string) {
   try {
     switch (stage) {
       case 'search':
-        await stageSearch(runId, config)
+        await stageSearch(runId, config, fromPhase)
         break
       case 'import':
-        await stageImport(runId, config)
+        await stageImport(runId, config, fromPhase)
         break
       case 'analyze':
-        await stageAnalyze(runId, config)
+        await stageAnalyze(runId, config, fromPhase)
         break
       case 'generate_sites':
-        await stageGenerateSites(runId, config)
+        await stageGenerateSites(runId, config, fromPhase)
         break
       case 'generate_messages':
-        await stageGenerateMessages(runId, config)
+        await stageGenerateMessages(runId, config, fromPhase)
         break
       case 'send':
-        await stageSend(runId, config)
+        await stageSend(runId, config, fromPhase)
         break
       default:
         console.error(`[pipeline/stages] Unknown stage: ${stage}`)
@@ -148,10 +153,15 @@ export async function processStage(runId: string, stage: string) {
   }
 }
 
-async function advanceOrComplete(runId: string, currentStage: string, config: PipelineConfig) {
+async function advanceOrComplete(
+  runId: string,
+  currentStage: string,
+  config: PipelineConfig,
+  fromPhase: 'a' | 'b' | 'init' = 'init'
+) {
   const next = getNextStage(currentStage, config)
   if (next) {
-    await triggerNextStage(runId, next)
+    await triggerNextStage(runId, next, fromPhase)
   } else {
     const supabase = createServiceClient()
     await supabase
@@ -168,7 +178,7 @@ async function advanceOrComplete(runId: string, currentStage: string, config: Pi
 
 // ─── Stage: Search ──────────────────────────────────────────────────────────────
 
-async function stageSearch(runId: string, config: PipelineConfig) {
+async function stageSearch(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
   const { supabase, updateRun, isCancelled } = createRunHelpers(runId)
 
   await updateRun({ stage: 'searching' })
@@ -228,12 +238,12 @@ async function stageSearch(runId: string, config: PipelineConfig) {
 
   if (await isCancelled()) return
 
-  await advanceOrComplete(runId, 'search', config)
+  await advanceOrComplete(runId, 'search', config, fromPhase)
 }
 
 // ─── Stage: Import ──────────────────────────────────────────────────────────────
 
-async function stageImport(runId: string, config: PipelineConfig) {
+async function stageImport(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
   const { supabase, updateRun, isCancelled } = createRunHelpers(runId)
 
   await updateRun({ stage: 'importing' })
@@ -301,12 +311,12 @@ async function stageImport(runId: string, config: PipelineConfig) {
 
   if (await isCancelled()) return
 
-  await advanceOrComplete(runId, 'import', config)
+  await advanceOrComplete(runId, 'import', config, fromPhase)
 }
 
 // ─── Stage: Analyze ─────────────────────────────────────────────────────────────
 
-async function stageAnalyze(runId: string, config: PipelineConfig) {
+async function stageAnalyze(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
   const { supabase, updateRun, updatePipelineLead, isCancelled } = createRunHelpers(runId)
 
   await updateRun({ stage: 'analyzing' })
@@ -388,12 +398,12 @@ async function stageAnalyze(runId: string, config: PipelineConfig) {
 
   if (cancelled) return
 
-  await advanceOrComplete(runId, 'analyze', config)
+  await advanceOrComplete(runId, 'analyze', config, fromPhase)
 }
 
 // ─── Stage: Generate Sites ──────────────────────────────────────────────────────
 
-async function stageGenerateSites(runId: string, config: PipelineConfig) {
+async function stageGenerateSites(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
   const { supabase, updateRun, updatePipelineLead, isCancelled } = createRunHelpers(runId)
 
   await updateRun({ stage: 'generating_sites' })
@@ -556,12 +566,12 @@ async function stageGenerateSites(runId: string, config: PipelineConfig) {
 
   if (cancelled) return
 
-  await advanceOrComplete(runId, 'generate_sites', config)
+  await advanceOrComplete(runId, 'generate_sites', config, fromPhase)
 }
 
 // ─── Stage: Generate Messages ───────────────────────────────────────────────────
 
-async function stageGenerateMessages(runId: string, config: PipelineConfig) {
+async function stageGenerateMessages(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
   const { supabase, updateRun, updatePipelineLead, isCancelled } = createRunHelpers(runId)
 
   await updateRun({ stage: 'generating_messages' })
@@ -622,12 +632,12 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig) {
 
   await updateRun({ messages_sent: messagesCount })
 
-  await advanceOrComplete(runId, 'generate_messages', config)
+  await advanceOrComplete(runId, 'generate_messages', config, fromPhase)
 }
 
 // ─── Stage: Send ────────────────────────────────────────────────────────────────
 
-async function stageSend(runId: string, config: PipelineConfig) {
+async function stageSend(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
   const { supabase, updateRun, updatePipelineLead, isCancelled } = createRunHelpers(runId)
 
   await updateRun({ stage: 'sending' })
@@ -712,5 +722,5 @@ async function stageSend(runId: string, config: PipelineConfig) {
     }
   }
 
-  await advanceOrComplete(runId, 'send', config)
+  await advanceOrComplete(runId, 'send', config, fromPhase)
 }

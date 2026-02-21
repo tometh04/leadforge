@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
   }
 
   after(async () => {
-    await processStage(runId, stage)
+    await processStage(runId, stage, 'b')
   })
 
   return NextResponse.json({ ok: true })
