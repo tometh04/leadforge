@@ -587,7 +587,7 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
   let sitesCount = alreadyGenerated
   let cancelled = false
 
-  const processLead = async (pl: (typeof freshPLeads extends (infer T)[] | null ? T : never)) => {
+  const processLead = async (pl: (typeof allPLeads extends (infer T)[] | null ? T : never)) => {
     if (cancelled || (await isCancelled())) {
       cancelled = true
       return
