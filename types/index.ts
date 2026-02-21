@@ -104,6 +104,7 @@ export type PipelineStage =
   | 'idle'
   | 'searching'
   | 'importing'
+  | 'processing'
   | 'analyzing'
   | 'generating_sites'
   | 'generating_messages'

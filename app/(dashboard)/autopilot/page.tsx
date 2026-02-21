@@ -70,9 +70,22 @@ const STAGES: { key: PipelineStage; label: string; icon: React.ElementType }[] =
   { key: 'sending', label: 'Enviar', icon: Send },
 ]
 
+/** Map pipeline_lead statuses to the visual stage they belong to */
+const STATUS_TO_STAGE_KEY: Record<string, PipelineStage> = {
+  analyzing: 'analyzing',
+  analyzed: 'analyzing',
+  generating_site: 'generating_sites',
+  site_generated: 'generating_sites',
+  generating_message: 'generating_messages',
+  message_ready: 'generating_messages',
+  sending: 'sending',
+  sent: 'sending',
+}
+
 function stageIndex(stage: PipelineStage): number {
   const idx = STAGES.findIndex((s) => s.key === stage)
   if (stage === 'done') return STAGES.length
+  if (stage === 'processing') return -1 // handled specially
   return idx
 }
 
@@ -345,9 +358,47 @@ export default function AutopilotPage() {
             <div className="flex items-center justify-between">
               {STAGES.map((s, i) => {
                 const Icon = s.icon
-                const isActive = s.key === state.stage
-                const isComplete = currentStageIdx > i
+                let isActive: boolean
+                let isComplete: boolean
                 const isError = state.stage === 'error' && currentStageIdx === i
+
+                if (state.stage === 'processing') {
+                  // During parallel processing, compute per-stage status from lead states
+                  const nonTerminal = state.leads.filter(
+                    (l) => l.status !== 'skipped' && l.status !== 'error'
+                  )
+                  // Search & import are always complete during processing
+                  if (s.key === 'searching' || s.key === 'importing') {
+                    isActive = false
+                    isComplete = true
+                  } else {
+                    const activeInStage = nonTerminal.some(
+                      (l) => STATUS_TO_STAGE_KEY[l.status] === s.key &&
+                        ACTIVE_STATUSES.includes(l.status)
+                    )
+                    const completedStatuses = nonTerminal.filter(
+                      (l) => {
+                        const stageKey = STATUS_TO_STAGE_KEY[l.status]
+                        if (!stageKey) return false
+                        const stageIdx = STAGES.findIndex((st) => st.key === stageKey)
+                        const thisIdx = STAGES.findIndex((st) => st.key === s.key)
+                        return stageIdx > thisIdx
+                      }
+                    )
+                    const doneStatuses = nonTerminal.filter(
+                      (l) => {
+                        const stageKey = STATUS_TO_STAGE_KEY[l.status]
+                        return stageKey === s.key && !ACTIVE_STATUSES.includes(l.status)
+                      }
+                    )
+                    isActive = activeInStage
+                    isComplete = !isActive && nonTerminal.length > 0 &&
+                      (completedStatuses.length + doneStatuses.length) === nonTerminal.length
+                  }
+                } else {
+                  isActive = s.key === state.stage
+                  isComplete = currentStageIdx > i
+                }
 
                 return (
                   <div key={s.key} className="flex flex-1 flex-col items-center gap-1.5">
@@ -489,7 +540,31 @@ export default function AutopilotPage() {
       )}
 
       {/* Historial */}
-      <PipelineHistory activeRunId={state.runId} />
+      <PipelineHistory
+        activeRunId={state.runId}
+        isRunning={isRunning}
+        onRerun={(pastRun) => {
+          const cfg = (pastRun.config ?? {}) as Record<string, unknown>
+          setNiche(pastRun.niche)
+          setCity(pastRun.city)
+          setMaxResults(Number(cfg.maxResults) || 20)
+          setSkipAnalysis(!!cfg.skipAnalysis)
+          setSkipSites(!!cfg.skipSiteGeneration)
+          setSkipMessages(!!cfg.skipMessages)
+          setSkipSending(!!cfg.skipSending)
+          run({
+            niche: pastRun.niche,
+            city: pastRun.city,
+            maxResults: Number(cfg.maxResults) || 20,
+            skipAnalysis: !!cfg.skipAnalysis,
+            skipSiteGeneration: !!cfg.skipSiteGeneration,
+            skipMessages: !!cfg.skipMessages,
+            skipSending: !!cfg.skipSending,
+          }).catch((err) => {
+            toast.error(err instanceof Error ? err.message : 'Error en el pipeline')
+          })
+        }}
+      />
     </div>
   )
 }
@@ -546,7 +621,15 @@ function RunStatusBadge({ status }: { status: PipelineRun['status'] }) {
   return <Badge className={v.className}>{v.label}</Badge>
 }
 
-function PipelineHistory({ activeRunId }: { activeRunId: string | null }) {
+function PipelineHistory({
+  activeRunId,
+  onRerun,
+  isRunning,
+}: {
+  activeRunId: string | null
+  onRerun: (run: PipelineRun) => void
+  isRunning: boolean
+}) {
   const [runs, setRuns] = useState<PipelineRun[]>([])
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [leadsCache, setLeadsCache] = useState<Record<string, PipelineLeadRow[]>>({})
@@ -614,6 +697,7 @@ function PipelineHistory({ activeRunId }: { activeRunId: string | null }) {
                 <TableHead className="text-center">Sitios</TableHead>
                 <TableHead className="text-center">Mensajes</TableHead>
                 <TableHead>Duración</TableHead>
+                <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -648,10 +732,26 @@ function PipelineHistory({ activeRunId }: { activeRunId: string | null }) {
                       <TableCell className="whitespace-nowrap text-sm">
                         {endTime ? formatDuration(run.created_at, endTime) : '—'}
                       </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1.5"
+                          disabled={isRunning}
+                          title={isRunning ? 'Esperá a que termine la ejecución actual' : 'Re-ejecutar con la misma configuración'}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onRerun(run)
+                          }}
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" />
+                          Re-ejecutar
+                        </Button>
+                      </TableCell>
                     </TableRow>
                     {isExpanded && (
                       <TableRow>
-                        <TableCell colSpan={10} className="bg-muted/30 p-0">
+                        <TableCell colSpan={11} className="bg-muted/30 p-0">
                           <div className="p-4">
                             {runErrors.length > 0 && (
                               <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-900/20">

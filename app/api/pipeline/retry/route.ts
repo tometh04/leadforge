@@ -98,19 +98,15 @@ export async function POST(req: NextRequest) {
         .eq('run_id', runId)
 
       const statuses = (updatedLeads ?? []).map((l) => l.status)
-      const hasPending = statuses.includes('pending')
-      const hasAnalyzed = statuses.includes('analyzed')
-      const hasSiteGenerated = statuses.includes('site_generated')
-      const hasMessageReady = statuses.includes('message_ready')
+      const hasWorkLeft =
+        statuses.includes('pending') ||
+        statuses.includes('analyzed') ||
+        statuses.includes('site_generated') ||
+        statuses.includes('message_ready')
 
-      if (hasPending && !config.skipAnalysis) {
-        resumeStage = 'analyze'
-      } else if (hasAnalyzed && !config.skipSiteGeneration) {
-        resumeStage = 'generate_sites'
-      } else if (hasSiteGenerated && !config.skipMessages) {
-        resumeStage = 'generate_messages'
-      } else if (hasMessageReady && !config.skipSending) {
-        resumeStage = 'send'
+      if (hasWorkLeft) {
+        // Use the parallel process_leads stage for retries
+        resumeStage = 'process_leads'
       } else {
         // Nothing left to do — mark as completed
         await supabase
@@ -131,6 +127,7 @@ export async function POST(req: NextRequest) {
     const stageToRunStage: Record<string, string> = {
       search: 'searching',
       import: 'importing',
+      process_leads: 'processing',
       analyze: 'analyzing',
       generate_sites: 'generating_sites',
       generate_messages: 'generating_messages',

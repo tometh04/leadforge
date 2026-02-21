@@ -104,6 +104,17 @@ export async function triggerNextStage(
 }
 
 function getNextStage(current: string, config: PipelineConfig): string | null {
+  // After import, all remaining stages are handled by process_leads in parallel
+  if (current === 'import') {
+    const hasWork =
+      !config.skipAnalysis ||
+      !config.skipSiteGeneration ||
+      !config.skipMessages ||
+      !config.skipSending
+    return hasWork ? 'process_leads' : null
+  }
+
+  // Legacy sequential order (for backward-compat with old runs)
   const order = [
     'search',
     'import',
@@ -244,6 +255,9 @@ export async function processStage(runId: string, stage: string, fromPhase: 'a' 
         break
       case 'send':
         await stageSend(runId, config, fromPhase)
+        break
+      case 'process_leads':
+        await stageProcessLeads(runId, config)
         break
       default:
         console.error(`[pipeline/stages] Unknown stage: ${stage}`)
@@ -1014,4 +1028,549 @@ async function stageSend(runId: string, config: PipelineConfig, fromPhase: 'a' |
 
   console.log(`[pipeline/stages] send END run=${runId} elapsed=${Date.now() - t0}ms sent=${sentCount}`)
   await advanceOrComplete(runId, 'send', config, fromPhase)
+}
+
+// ─── SendQueue (shared WhatsApp socket for parallel pipeline) ────────────────
+
+class SendQueue {
+  private queue: Array<{
+    pl: Record<string, unknown>
+    resolve: () => void
+    reject: (err: unknown) => void
+  }> = []
+  private sock: Awaited<ReturnType<typeof createWhatsAppSocket>>['sock'] | null = null
+  private draining = false
+  private connectionError: unknown = null
+  private connected = false
+  private runHelpers: ReturnType<typeof createRunHelpers>
+
+  constructor(runHelpers: ReturnType<typeof createRunHelpers>) {
+    this.runHelpers = runHelpers
+  }
+
+  async enqueue(pl: Record<string, unknown>): Promise<void> {
+    if (this.connectionError) throw this.connectionError
+
+    // Lazily connect on first enqueue
+    if (!this.sock && !this.connected) {
+      try {
+        const socketResult = await createWhatsAppSocket()
+        this.sock = socketResult.sock
+        await waitForConnection(this.sock, 15000)
+        this.connected = true
+      } catch (err) {
+        this.connectionError = err
+        throw err
+      }
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      this.queue.push({ pl, resolve, reject })
+      this.drain()
+    })
+  }
+
+  private async drain(): Promise<void> {
+    if (this.draining) return
+    this.draining = true
+
+    while (this.queue.length > 0) {
+      const item = this.queue.shift()!
+      const { pl, resolve, reject } = item
+
+      try {
+        await this.runHelpers.updatePipelineLead(pl.id as string, { status: 'sending' })
+        const mt0 = Date.now()
+
+        const jid = formatPhoneToJid(pl.phone as string)
+        await this.sock!.sendMessage(jid, { text: pl.message as string })
+
+        await this.runHelpers.supabase.from('messages').insert({
+          lead_id: pl.lead_id,
+          channel: 'whatsapp',
+          message_body: pl.message,
+          template_used: 'autopilot',
+        })
+
+        await this.runHelpers.supabase
+          .from('leads')
+          .update({
+            status: 'contactado',
+            last_contacted_at: new Date().toISOString(),
+          })
+          .eq('id', pl.lead_id)
+
+        await this.runHelpers.supabase.from('lead_activity').insert({
+          lead_id: pl.lead_id,
+          action: 'contactado',
+          detail: 'Mensaje enviado por WhatsApp (autopilot)',
+        })
+
+        await this.runHelpers.updatePipelineLead(pl.id as string, { status: 'sent' })
+        console.log(`[pipeline/stages] send lead="${pl.business_name}" elapsed=${Date.now() - mt0}ms`)
+        resolve()
+      } catch (err) {
+        const errMsg = toErrorMessage(err, 'Error al enviar')
+        await this.runHelpers.updatePipelineLead(pl.id as string, { status: 'error', error: errMsg })
+        await this.runHelpers.reportError({
+          step: 'send_message',
+          leadId: pl.lead_id as string,
+          businessName: pl.business_name as string,
+          error: errMsg,
+          cause: err,
+        })
+        reject(err)
+      }
+
+      // Anti-ban delay (4s between messages)
+      if (this.queue.length > 0) {
+        await new Promise((r) => setTimeout(r, 4000))
+      }
+    }
+
+    this.draining = false
+  }
+
+  close(): void {
+    if (this.sock) {
+      this.sock.end(undefined)
+      this.sock = null
+    }
+    // Reject any remaining queued items
+    for (const item of this.queue) {
+      item.reject(new Error('SendQueue closed'))
+    }
+    this.queue = []
+  }
+}
+
+// ─── Stage: Process Leads (parallel per-lead pipeline) ──────────────────────
+
+async function processOneLead(
+  runId: string,
+  pl: Record<string, unknown>,
+  config: PipelineConfig,
+  counters: { analyzed: number; sitesGenerated: number; messagesGenerated: number; sent: number },
+  helpers: ReturnType<typeof createRunHelpers>,
+  sendQueue: SendQueue
+): Promise<void> {
+  const { supabase, updateRun, updatePipelineLead, isCancelled, reportError } = helpers
+
+  if (pl.status === 'skipped' || pl.status === 'sent') return
+
+  // ── Step 1: Analyze ──
+  if (!config.skipAnalysis && (pl.status === 'pending')) {
+    if (await isCancelled()) return
+
+    const dbLeadRes = await supabase
+      .from('leads')
+      .select('id, business_name, phone, website, status, place_id')
+      .eq('id', pl.lead_id)
+      .single()
+    const dbLead = dbLeadRes.data
+
+    if (!dbLead?.website) {
+      await updatePipelineLead(pl.id as string, { status: 'error', error: 'Sin website' })
+      await reportError({
+        step: 'lead_precheck',
+        leadId: pl.lead_id as string,
+        businessName: pl.business_name as string,
+        error: 'Sin website',
+        code: 'missing_website',
+      })
+      return
+    }
+
+    await updatePipelineLead(pl.id as string, { status: 'analyzing' })
+    const lt0 = Date.now()
+
+    try {
+      const scraped = await scrapeSite(dbLead.website)
+      const { score, details } = await analyzeWebsite(dbLead.website, scraped)
+      const newStatus = score < 6 ? 'candidato' : 'analizado'
+
+      await supabase
+        .from('leads')
+        .update({
+          score,
+          score_summary: details.summary,
+          score_details: {
+            ...details,
+            site_type: scraped.siteType,
+            scraped_images: scraped.imageUrls.slice(0, 8),
+            logo_url: scraped.logoUrl,
+            social_links: scraped.socialLinks,
+            visible_text: scraped.visibleText.slice(0, 2000),
+            emails: scraped.emails,
+            page_title: scraped.title,
+            meta_description: scraped.description,
+            sub_pages_text: scraped.subPagesText.slice(0, 6000),
+            sub_pages_count: scraped.subPagesCount,
+          },
+          status: newStatus,
+        })
+        .eq('id', pl.lead_id)
+
+      await supabase.from('lead_activity').insert({
+        lead_id: pl.lead_id,
+        action: 'analizado',
+        detail: `Score: ${score}/10 — Tipo: ${scraped.siteType} — ${newStatus === 'candidato' ? 'Candidato' : 'Analizado'}`,
+      })
+
+      await updatePipelineLead(pl.id as string, { status: 'analyzed', score })
+      pl.status = 'analyzed'
+      pl.score = score
+      counters.analyzed++
+      await updateRun({ analyzed: counters.analyzed })
+      console.log(`[pipeline/stages] process lead="${pl.business_name}" analyze elapsed=${Date.now() - lt0}ms score=${score}`)
+    } catch (err) {
+      console.log(`[pipeline/stages] process lead="${pl.business_name}" analyze elapsed=${Date.now() - lt0}ms ERROR`)
+      const errMsg = toErrorMessage(err, 'Error al analizar')
+      await updatePipelineLead(pl.id as string, { status: 'error', error: errMsg })
+      await reportError({
+        step: 'analyze_lead',
+        leadId: pl.lead_id as string,
+        businessName: pl.business_name as string,
+        error: errMsg,
+        cause: err,
+      })
+      return
+    }
+  }
+
+  // ── Step 2: Generate Site ──
+  if (
+    !config.skipSiteGeneration &&
+    ['analyzed', 'pending'].includes(pl.status as string)
+  ) {
+    if (await isCancelled()) return
+
+    // Skip high-score leads
+    if (pl.score && (pl.score as number) >= 6) {
+      await updatePipelineLead(pl.id as string, { status: 'skipped' })
+      return
+    }
+
+    await updatePipelineLead(pl.id as string, { status: 'generating_site', error: null })
+    await updateRun({}) // heartbeat
+    const lt0 = Date.now()
+
+    try {
+      const { data: lead } = await supabase
+        .from('leads')
+        .select(
+          'id, business_name, category, niche, address, phone, website, place_id, rating, google_photo_url, score_details'
+        )
+        .eq('id', pl.lead_id)
+        .single()
+
+      if (!lead) {
+        await updatePipelineLead(pl.id as string, { status: 'error', error: 'Lead no encontrado' })
+        await reportError({
+          step: 'fetch_lead',
+          leadId: pl.lead_id as string,
+          businessName: pl.business_name as string,
+          error: 'Lead no encontrado',
+          code: 'lead_not_found',
+        })
+        return
+      }
+
+      const existingDetails = (lead.score_details ?? {}) as Record<string, unknown>
+      const rawLogoUrl = (existingDetails.logo_url as string | null) ?? null
+      const rawImages = (existingDetails.scraped_images as string[]) ?? []
+
+      const ICON_URL_KEYWORDS = [
+        'logo', 'icon', 'favicon', 'sprite', 'whatsapp', 'facebook',
+        'instagram', 'twitter', 'badge', 'btn', 'arrow', 'close', 'menu',
+      ]
+      const filteredImages = rawImages.filter((url: string) => {
+        const u = url.toLowerCase()
+        if (rawLogoUrl && u === rawLogoUrl.toLowerCase()) return false
+        if (ICON_URL_KEYWORDS.some((kw) => u.includes(kw))) return false
+        return true
+      })
+
+      const scrapedData: ScrapedBusinessData | undefined = existingDetails.visible_text
+        ? {
+            visibleText: existingDetails.visible_text as string,
+            imageUrls: filteredImages,
+            logoUrl: rawLogoUrl,
+            socialLinks: (existingDetails.social_links as { platform: string; url: string }[]) ?? [],
+            siteType: (existingDetails.site_type as string) ?? undefined,
+            googlePhotoUrl: lead.google_photo_url ?? null,
+            emails: (existingDetails.emails as string[]) ?? [],
+            pageTitle: (existingDetails.page_title as string) ?? '',
+            metaDescription: (existingDetails.meta_description as string) ?? '',
+            subPagesText: (existingDetails.sub_pages_text as string) ?? '',
+            subPagesCount: (existingDetails.sub_pages_count as number) ?? 0,
+          }
+        : lead.google_photo_url
+          ? { googlePhotoUrl: lead.google_photo_url }
+          : undefined
+
+      let openingHours: string[] | null = null
+      let googleRating: number | null = lead.rating ?? null
+      let googleReviewCount: number | null = null
+
+      if (existingDetails.opening_hours) {
+        openingHours = existingDetails.opening_hours as string[]
+      }
+      if (lead.place_id) {
+        try {
+          const details = await fetchPlaceDetails(lead.place_id)
+          if (details.openingHours) openingHours = details.openingHours
+          if (details.rating) googleRating = details.rating
+          if (details.userRatingCount) googleReviewCount = details.userRatingCount
+        } catch {
+          // fetchPlaceDetails failed, continue with what we have
+        }
+      }
+
+      const allImageUrls: string[] = []
+      if (scrapedData?.googlePhotoUrl) allImageUrls.push(scrapedData.googlePhotoUrl)
+      if (scrapedData?.imageUrls) {
+        for (const url of scrapedData.imageUrls) {
+          if (!allImageUrls.includes(url) && url !== rawLogoUrl) {
+            allImageUrls.push(url)
+          }
+        }
+      }
+
+      const html = await generateSiteHTML({
+        businessName: lead.business_name,
+        category: lead.category ?? lead.niche,
+        address: lead.address ?? '',
+        phone: lead.phone ?? '',
+        scraped: scrapedData,
+        googleRating,
+        googleReviewCount,
+        openingHours,
+        imageUrls: allImageUrls,
+        logoUrl: rawLogoUrl,
+      })
+
+      const slug = `${slugify(lead.business_name)}-${lead.id.slice(0, 6)}`
+      const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
+      const previewUrl = `${appUrl}/preview/${slug}`
+
+      const { site_html: _old, site_slug: _oldSlug, ...scoreOnly } = existingDetails
+      await supabase
+        .from('leads')
+        .update({
+          generated_site_url: previewUrl,
+          status: 'sitio_generado',
+          score_details: {
+            ...scoreOnly,
+            site_html: html,
+            site_slug: slug,
+            ...(openingHours ? { opening_hours: openingHours } : {}),
+          },
+        })
+        .eq('id', lead.id)
+
+      await supabase.from('lead_activity').insert({
+        lead_id: lead.id,
+        action: 'sitio_generado',
+        detail: `Sitio generado: ${previewUrl}`,
+      })
+
+      await updatePipelineLead(pl.id as string, { status: 'site_generated', site_url: previewUrl })
+      pl.status = 'site_generated'
+      counters.sitesGenerated++
+      await updateRun({ sites_generated: counters.sitesGenerated })
+      console.log(`[pipeline/stages] process lead="${pl.business_name}" generate_site elapsed=${Date.now() - lt0}ms`)
+    } catch (err) {
+      console.log(`[pipeline/stages] process lead="${pl.business_name}" generate_site elapsed=${Date.now() - lt0}ms ERROR`)
+      const errMsg = toErrorMessage(err, 'Error generando sitio')
+      await updatePipelineLead(pl.id as string, { status: 'error', error: errMsg })
+      await reportError({
+        step: 'generate_site',
+        leadId: pl.lead_id as string,
+        businessName: pl.business_name as string,
+        error: errMsg,
+        cause: err,
+      })
+      return
+    }
+  }
+
+  // ── Step 3: Generate Message ──
+  if (
+    !config.skipMessages &&
+    ['site_generated', 'analyzed', 'pending'].includes(pl.status as string)
+  ) {
+    if (await isCancelled()) return
+    if (!(pl.phone as string)) return
+
+    await updatePipelineLead(pl.id as string, { status: 'generating_message', error: null })
+    const lt0 = Date.now()
+
+    try {
+      const { data: lead } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('id', pl.lead_id)
+        .single()
+
+      if (!lead) {
+        await updatePipelineLead(pl.id as string, { status: 'error', error: 'Lead no encontrado' })
+        await reportError({
+          step: 'fetch_lead',
+          leadId: pl.lead_id as string,
+          businessName: pl.business_name as string,
+          error: 'Lead no encontrado',
+          code: 'lead_not_found',
+        })
+        return
+      }
+
+      let message: string
+      try {
+        message = await generateWhatsAppMessage(
+          lead.business_name,
+          lead.category ?? lead.niche,
+          lead.address ?? '',
+          lead.generated_site_url
+        )
+      } catch (err) {
+        if (isAnthropicRateLimitError(err)) throw err
+        message = buildDefaultMessage(lead.business_name, lead.generated_site_url)
+      }
+
+      await updatePipelineLead(pl.id as string, { status: 'message_ready', message })
+      pl.status = 'message_ready'
+      pl.message = message
+      counters.messagesGenerated++
+      console.log(`[pipeline/stages] process lead="${pl.business_name}" generate_message elapsed=${Date.now() - lt0}ms`)
+    } catch (err) {
+      console.log(`[pipeline/stages] process lead="${pl.business_name}" generate_message elapsed=${Date.now() - lt0}ms ERROR`)
+      const errMsg = toErrorMessage(err, 'Error generando mensaje')
+      await updatePipelineLead(pl.id as string, { status: 'error', error: errMsg })
+      await reportError({
+        step: 'generate_message',
+        leadId: pl.lead_id as string,
+        businessName: pl.business_name as string,
+        error: errMsg,
+        cause: err,
+      })
+      return
+    }
+  }
+
+  // ── Step 4: Send ──
+  if (
+    !config.skipSending &&
+    pl.status === 'message_ready' &&
+    pl.message &&
+    pl.phone
+  ) {
+    if (await isCancelled()) return
+
+    try {
+      await sendQueue.enqueue(pl)
+      pl.status = 'sent'
+      counters.sent++
+      await updateRun({ messages_sent: counters.sent })
+    } catch {
+      // Error already handled inside SendQueue
+    }
+  }
+}
+
+async function stageProcessLeads(runId: string, config: PipelineConfig): Promise<void> {
+  const helpers = createRunHelpers(runId, 'process_leads')
+  const { supabase, updateRun, updatePipelineLead, isCancelled } = helpers
+
+  await updateRun({ stage: 'processing' })
+  const t0 = Date.now()
+  console.log(`[pipeline/stages] process_leads START run=${runId}`)
+
+  const { data: allPLeads } = await supabase
+    .from('pipeline_leads')
+    .select('*')
+    .eq('run_id', runId)
+
+  const pLeads = allPLeads ?? []
+
+  // Reset orphaned leads stuck in active states from killed runs
+  const activeStatuses = ['analyzing', 'generating_site', 'generating_message', 'sending']
+  for (const pl of pLeads) {
+    if (activeStatuses.includes(pl.status)) {
+      let resetStatus = 'pending'
+      if (pl.status === 'generating_site') resetStatus = 'analyzed'
+      else if (pl.status === 'generating_message') resetStatus = 'site_generated'
+      else if (pl.status === 'sending') resetStatus = 'message_ready'
+      console.log(`[pipeline/stages] process_leads reset orphaned lead="${pl.business_name}" ${pl.status} → ${resetStatus}`)
+      await updatePipelineLead(pl.id, { status: resetStatus, error: null })
+      pl.status = resetStatus
+    }
+  }
+
+  // Initialize counters from already-completed leads
+  const counters = {
+    analyzed: pLeads.filter((pl) =>
+      ['analyzed', 'site_generated', 'generating_site', 'generating_message', 'message_ready', 'sending', 'sent'].includes(pl.status)
+    ).length,
+    sitesGenerated: pLeads.filter((pl) =>
+      ['site_generated', 'generating_message', 'message_ready', 'sending', 'sent'].includes(pl.status)
+    ).length,
+    messagesGenerated: pLeads.filter((pl) =>
+      ['message_ready', 'sending', 'sent'].includes(pl.status)
+    ).length,
+    sent: pLeads.filter((pl) => pl.status === 'sent').length,
+  }
+  await updateRun({
+    analyzed: counters.analyzed,
+    sites_generated: counters.sitesGenerated,
+    messages_sent: counters.sent,
+  })
+
+  // Filter to leads that still need processing
+  const leadsToProcess = pLeads.filter(
+    (pl) => pl.status !== 'skipped' && pl.status !== 'sent' && pl.status !== 'error'
+  )
+
+  const sendQueue = new SendQueue(helpers)
+
+  try {
+    await pMap(
+      leadsToProcess,
+      async (pl) => {
+        if (await isCancelled()) return
+        await processOneLead(
+          runId,
+          pl as unknown as Record<string, unknown>,
+          config,
+          counters,
+          helpers,
+          sendQueue
+        )
+      },
+      3
+    )
+  } finally {
+    sendQueue.close()
+  }
+
+  if (await isCancelled()) return
+
+  // Mark run as completed
+  await supabase
+    .from('pipeline_runs')
+    .update({
+      status: 'completed',
+      stage: 'done',
+      analyzed: counters.analyzed,
+      sites_generated: counters.sitesGenerated,
+      messages_sent: counters.sent,
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', runId)
+
+  console.log(
+    `[pipeline/stages] process_leads END run=${runId} elapsed=${Date.now() - t0}ms` +
+    ` analyzed=${counters.analyzed} sites=${counters.sitesGenerated} messages=${counters.messagesGenerated} sent=${counters.sent}`
+  )
 }
