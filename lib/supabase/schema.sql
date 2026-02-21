@@ -91,7 +91,10 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
   sites_generated integer DEFAULT 0,
   messages_sent integer DEFAULT 0,
   errors jsonb DEFAULT '[]',
-  completed_at timestamptz
+  completed_at timestamptz,
+  stage text DEFAULT 'idle',
+  config jsonb DEFAULT '{}',
+  search_results jsonb
 );
 
 -- Auto-update updated_at on every row change
