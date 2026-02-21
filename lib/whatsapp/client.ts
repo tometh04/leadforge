@@ -23,7 +23,7 @@ export async function createWhatsAppSocket() {
 
 export function waitForConnection(
   sock: ReturnType<typeof makeWASocket>,
-  timeout = 15000
+  timeout = 30000
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {

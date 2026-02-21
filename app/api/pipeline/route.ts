@@ -23,12 +23,12 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { niche, city } = await req.json()
+    const { niche, city, config } = await req.json()
     const supabase = await createClient()
 
     const { data, error } = await supabase
       .from('pipeline_runs')
-      .insert({ niche, city, status: 'running' })
+      .insert({ niche, city, status: 'running', stage: 'searching', config: config ?? {} })
       .select()
       .single()
 

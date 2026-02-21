@@ -81,6 +81,8 @@ export interface PipelineRun {
   niche: string
   city: string
   status: 'running' | 'completed' | 'failed' | 'cancelled'
+  stage: PipelineStage
+  config: Record<string, unknown>
   total_leads: number
   analyzed: number
   sites_generated: number
@@ -120,6 +122,20 @@ export interface PipelineLeadState {
   siteUrl?: string
   message?: string
   error?: string
+}
+
+export interface PipelineLeadRow {
+  id: string
+  run_id: string
+  lead_id: string | null
+  business_name: string
+  phone: string
+  status: PipelineLeadState['status']
+  score: number | null
+  site_url: string | null
+  message: string | null
+  error: string | null
+  created_at: string
 }
 
 export interface ScraperResult {

@@ -125,7 +125,6 @@ export default function AutopilotPage() {
         skipMessages,
         skipSending,
       })
-      toast.success('Pipeline completado')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error en el pipeline')
     }
@@ -142,6 +141,21 @@ export default function AutopilotPage() {
           Ejecutá el pipeline completo: buscar, analizar, generar sitios y enviar mensajes.
         </p>
       </div>
+
+      {/* Resuming state */}
+      {state.resuming && (
+        <div className="mb-6 flex items-center gap-3 rounded-lg border border-blue-300 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
+          <Loader2 className="h-5 w-5 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
+              Recuperando progreso...
+            </p>
+            <p className="text-xs text-blue-700 dark:text-blue-300">
+              Se detectó un pipeline en ejecución. Reconectando.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* WhatsApp warning */}
       {whatsappPaired === false && !skipSending && (

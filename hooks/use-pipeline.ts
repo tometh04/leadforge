@@ -1,7 +1,7 @@
 'use client'
 
-import { useReducer, useRef, useCallback } from 'react'
-import type { PipelineStage, PipelineLeadState, ScraperResult } from '@/types'
+import { useReducer, useRef, useCallback, useEffect } from 'react'
+import type { PipelineStage, PipelineLeadState, PipelineLeadRow } from '@/types'
 
 interface PipelineConfig {
   niche: string
@@ -27,15 +27,17 @@ interface PipelineState {
     errors: number
   }
   error: string | null
+  resuming: boolean
 }
 
 type PipelineAction =
   | { type: 'START'; runId: string }
   | { type: 'SET_STAGE'; stage: PipelineStage }
   | { type: 'SET_LEADS'; leads: PipelineLeadState[] }
-  | { type: 'UPDATE_LEAD'; leadId: string; updates: Partial<PipelineLeadState> }
-  | { type: 'INCREMENT'; key: keyof PipelineState['progress'] }
+  | { type: 'SYNC'; stage: PipelineStage; leads: PipelineLeadState[]; progress: PipelineState['progress'] }
   | { type: 'SET_ERROR'; error: string }
+  | { type: 'DONE'; stage: PipelineStage }
+  | { type: 'RESUMING'; runId: string }
   | { type: 'RESET' }
 
 const initialState: PipelineState = {
@@ -52,6 +54,7 @@ const initialState: PipelineState = {
     errors: 0,
   },
   error: null,
+  resuming: false,
 }
 
 function reducer(state: PipelineState, action: PipelineAction): PipelineState {
@@ -62,20 +65,20 @@ function reducer(state: PipelineState, action: PipelineAction): PipelineState {
       return { ...state, stage: action.stage }
     case 'SET_LEADS':
       return { ...state, leads: action.leads }
-    case 'UPDATE_LEAD':
+    case 'SYNC':
       return {
         ...state,
-        leads: state.leads.map((l) =>
-          l.leadId === action.leadId ? { ...l, ...action.updates } : l
-        ),
-      }
-    case 'INCREMENT':
-      return {
-        ...state,
-        progress: { ...state.progress, [action.key]: state.progress[action.key] + 1 },
+        stage: action.stage,
+        leads: action.leads,
+        progress: action.progress,
+        resuming: false,
       }
     case 'SET_ERROR':
-      return { ...state, stage: 'error', error: action.error }
+      return { ...state, stage: 'error', error: action.error, resuming: false }
+    case 'DONE':
+      return { ...state, stage: action.stage, resuming: false }
+    case 'RESUMING':
+      return { ...state, resuming: true, runId: action.runId, stage: 'searching' }
     case 'RESET':
       return initialState
     default:
@@ -83,364 +86,166 @@ function reducer(state: PipelineState, action: PipelineAction): PipelineState {
   }
 }
 
+/** Map DB pipeline_lead row to UI PipelineLeadState */
+function dbLeadToState(row: PipelineLeadRow): PipelineLeadState {
+  return {
+    leadId: row.lead_id ?? row.id,
+    businessName: row.business_name,
+    phone: row.phone,
+    status: row.status,
+    score: row.score ?? undefined,
+    siteUrl: row.site_url ?? undefined,
+    message: row.message ?? undefined,
+    error: row.error ?? undefined,
+  }
+}
+
+const POLL_INTERVAL = 3000
+
 export function usePipeline() {
   const [state, dispatch] = useReducer(reducer, initialState)
-  const cancelledRef = useRef(false)
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const updateRun = async (id: string, updates: Record<string, unknown>) => {
-    await fetch('/api/pipeline', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, ...updates }),
-    })
-  }
-
-  const run = useCallback(async (config: PipelineConfig) => {
-    cancelledRef.current = false
-
-    // Crear run en DB
-    const runRes = await fetch('/api/pipeline', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ niche: config.niche, city: config.city }),
-    })
-    const runData = await runRes.json()
-    if (!runRes.ok) throw new Error(runData.error)
-
-    dispatch({ type: 'START', runId: runData.id })
-
-    try {
-      // ── 1. SEARCH ──
-      const searchRes = await fetch('/api/scraper/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          niche: config.niche,
-          city: config.city,
-          maxResults: config.maxResults,
-        }),
-      })
-      const searchData = await searchRes.json()
-      if (!searchRes.ok) throw new Error(searchData.error)
-      if (cancelledRef.current) return
-
-      const results: ScraperResult[] = searchData.results ?? []
-      dispatch({
-        type: 'SET_LEADS',
-        leads: results.map((r) => ({
-          leadId: '',
-          businessName: r.business_name,
-          phone: r.phone,
-          status: 'pending' as const,
-        })),
-      })
-
-      // ── 2. IMPORT ──
-      dispatch({ type: 'SET_STAGE', stage: 'importing' })
-
-      const viableLeads = results.filter((r) => !r.already_imported)
-      if (viableLeads.length === 0) {
-        dispatch({ type: 'SET_STAGE', stage: 'done' })
-        await updateRun(runData.id, { status: 'completed', completed_at: new Date().toISOString() })
-        return
-      }
-
-      const importRes = await fetch('/api/scraper/import', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          leads: viableLeads,
-          niche: config.niche,
-          city: config.city,
-        }),
-      })
-      const importData = await importRes.json()
-      if (!importRes.ok) throw new Error(importData.error)
-      if (cancelledRef.current) return
-
-      // Obtener los leads importados con sus IDs
-      const leadsRes = await fetch(
-        `/api/leads?niche=${encodeURIComponent(config.niche)}&city=${encodeURIComponent(config.city)}&status=nuevo&limit=100`
-      )
-      const leadsData = await leadsRes.json()
-      if (!leadsRes.ok) throw new Error(leadsData.error)
-
-      const importedLeads = leadsData.leads ?? leadsData.data ?? leadsData
-      const leadStates: PipelineLeadState[] = (Array.isArray(importedLeads) ? importedLeads : []).map(
-        (l: { id: string; business_name: string; phone: string; website: string; status: string }) => ({
-          leadId: l.id,
-          businessName: l.business_name,
-          phone: l.phone || '',
-          status: l.status === 'contactado' ? 'skipped' as const : 'pending' as const,
-        })
-      )
-
-      dispatch({ type: 'SET_LEADS', leads: leadStates })
-      for (let i = 0; i < leadStates.length; i++) {
-        dispatch({ type: 'INCREMENT', key: 'imported' })
-      }
-      await updateRun(runData.id, { total_leads: leadStates.length })
-
-      // ── 3. ANALYZE ──
-      if (!config.skipAnalysis) {
-        dispatch({ type: 'SET_STAGE', stage: 'analyzing' })
-
-        for (const lead of leadStates) {
-          if (cancelledRef.current) return
-          if (lead.status === 'skipped') continue
-
-          dispatch({ type: 'UPDATE_LEAD', leadId: lead.leadId, updates: { status: 'analyzing' } })
-
-          try {
-            const res = await fetch(`/api/analyze/${lead.leadId}`, { method: 'POST' })
-            const data = await res.json()
-
-            if (res.ok) {
-              lead.score = data.score
-              lead.status = 'analyzed'
-              dispatch({
-                type: 'UPDATE_LEAD',
-                leadId: lead.leadId,
-                updates: { status: 'analyzed', score: data.score },
-              })
-              dispatch({ type: 'INCREMENT', key: 'analyzed' })
-            } else {
-              lead.status = 'error'
-              dispatch({
-                type: 'UPDATE_LEAD',
-                leadId: lead.leadId,
-                updates: { status: 'error', error: data.error || 'Error al analizar' },
-              })
-              dispatch({ type: 'INCREMENT', key: 'errors' })
-            }
-          } catch (err) {
-            lead.status = 'error'
-            dispatch({
-              type: 'UPDATE_LEAD',
-              leadId: lead.leadId,
-              updates: { status: 'error', error: err instanceof Error ? err.message : 'Error' },
-            })
-            dispatch({ type: 'INCREMENT', key: 'errors' })
-          }
-        }
-
-        await updateRun(runData.id, { analyzed: leadStates.filter((l) => l.score).length })
-      }
-
-      // ── 4. GENERATE SITES ──
-      if (!config.skipSiteGeneration) {
-        dispatch({ type: 'SET_STAGE', stage: 'generating_sites' })
-
-        for (const lead of leadStates) {
-          if (cancelledRef.current) return
-          if (lead.status === 'skipped') continue
-          // Skip si score >= 6 (sitio actual es decente)
-          if (lead.score && lead.score >= 6) {
-            dispatch({
-              type: 'UPDATE_LEAD',
-              leadId: lead.leadId,
-              updates: { status: 'skipped' },
-            })
-            continue
-          }
-
-          dispatch({
-            type: 'UPDATE_LEAD',
-            leadId: lead.leadId,
-            updates: { status: 'generating_site' },
-          })
-
-          try {
-            const res = await fetch(`/api/generate-site/${lead.leadId}`, { method: 'POST' })
-            const data = await res.json()
-
-            if (res.ok) {
-              lead.siteUrl = data.preview_url
-              lead.status = 'site_generated'
-              dispatch({
-                type: 'UPDATE_LEAD',
-                leadId: lead.leadId,
-                updates: { status: 'site_generated', siteUrl: lead.siteUrl },
-              })
-              dispatch({ type: 'INCREMENT', key: 'sitesGenerated' })
-            } else {
-              lead.status = 'error'
-              dispatch({
-                type: 'UPDATE_LEAD',
-                leadId: lead.leadId,
-                updates: { status: 'error', error: data.error },
-              })
-              dispatch({ type: 'INCREMENT', key: 'errors' })
-            }
-          } catch (err) {
-            lead.status = 'error'
-            dispatch({
-              type: 'UPDATE_LEAD',
-              leadId: lead.leadId,
-              updates: { status: 'error', error: err instanceof Error ? err.message : 'Error' },
-            })
-            dispatch({ type: 'INCREMENT', key: 'errors' })
-          }
-        }
-
-        await updateRun(runData.id, {
-          sites_generated: leadStates.filter((l) => l.siteUrl).length,
-        })
-      }
-
-      // ── 5. GENERATE MESSAGES ──
-      if (!config.skipMessages) {
-        dispatch({ type: 'SET_STAGE', stage: 'generating_messages' })
-
-        for (const lead of leadStates) {
-          if (cancelledRef.current) return
-          if (!lead.phone) continue
-          if (lead.status === 'skipped' || lead.status === 'error') continue
-
-          dispatch({
-            type: 'UPDATE_LEAD',
-            leadId: lead.leadId,
-            updates: { status: 'generating_message' },
-          })
-
-          try {
-            const res = await fetch(`/api/outreach/generate-message/${lead.leadId}`, {
-              method: 'POST',
-            })
-            const data = await res.json()
-
-            if (res.ok) {
-              lead.message = data.message
-              lead.status = 'message_ready'
-              dispatch({
-                type: 'UPDATE_LEAD',
-                leadId: lead.leadId,
-                updates: { status: 'message_ready', message: data.message },
-              })
-              dispatch({ type: 'INCREMENT', key: 'messagesGenerated' })
-            } else {
-              lead.status = 'error'
-              dispatch({
-                type: 'UPDATE_LEAD',
-                leadId: lead.leadId,
-                updates: { status: 'error', error: data.error },
-              })
-              dispatch({ type: 'INCREMENT', key: 'errors' })
-            }
-          } catch (err) {
-            lead.status = 'error'
-            dispatch({
-              type: 'UPDATE_LEAD',
-              leadId: lead.leadId,
-              updates: { status: 'error', error: err instanceof Error ? err.message : 'Error' },
-            })
-            dispatch({ type: 'INCREMENT', key: 'errors' })
-          }
-        }
-      }
-
-      // ── 6. SEND VIA WHATSAPP ──
-      if (!config.skipSending) {
-        dispatch({ type: 'SET_STAGE', stage: 'sending' })
-
-        const toSend = leadStates
-          .filter((l) => l.message && l.phone && l.status === 'message_ready')
-          .map((l) => ({ leadId: l.leadId, phone: l.phone, message: l.message! }))
-
-        if (toSend.length > 0) {
-          // Enviar en batches de 10
-          for (let i = 0; i < toSend.length; i += 10) {
-            if (cancelledRef.current) return
-            const batch = toSend.slice(i, i + 10)
-
-            await new Promise<void>((resolve, reject) => {
-              const response = fetch('/api/whatsapp/send-batch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ leads: batch }),
-              })
-
-              response
-                .then(async (res) => {
-                  const reader = res.body?.getReader()
-                  if (!reader) {
-                    reject(new Error('No stream'))
-                    return
-                  }
-
-                  const decoder = new TextDecoder()
-                  let buffer = ''
-
-                  while (true) {
-                    const { done, value } = await reader.read()
-                    if (done) break
-
-                    buffer += decoder.decode(value, { stream: true })
-                    const lines = buffer.split('\n')
-                    buffer = lines.pop() || ''
-
-                    for (const line of lines) {
-                      if (!line.startsWith('data: ')) continue
-                      const data = JSON.parse(line.slice(6))
-
-                      if (data.type === 'sent') {
-                        const sentLead = leadStates.find((l) => l.leadId === data.leadId)
-                        if (sentLead) sentLead.status = 'sent'
-                        dispatch({
-                          type: 'UPDATE_LEAD',
-                          leadId: data.leadId,
-                          updates: { status: 'sent' },
-                        })
-                        dispatch({ type: 'INCREMENT', key: 'sent' })
-                      } else if (data.type === 'error') {
-                        const errLead = leadStates.find((l) => l.leadId === data.leadId)
-                        if (errLead) errLead.status = 'error'
-                        dispatch({
-                          type: 'UPDATE_LEAD',
-                          leadId: data.leadId,
-                          updates: { status: 'error', error: data.error },
-                        })
-                        dispatch({ type: 'INCREMENT', key: 'errors' })
-                      } else if (data.type === 'fatal') {
-                        reject(new Error(data.error))
-                        return
-                      }
-                    }
-                  }
-
-                  resolve()
-                })
-                .catch(reject)
-            })
-          }
-        }
-
-        await updateRun(runData.id, {
-          messages_sent: leadStates.filter((l) => l.status === 'sent').length,
-        })
-      }
-
-      // ── DONE ──
-      dispatch({ type: 'SET_STAGE', stage: 'done' })
-      await updateRun(runData.id, {
-        status: 'completed',
-        completed_at: new Date().toISOString(),
-      })
-    } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Error desconocido'
-      dispatch({ type: 'SET_ERROR', error: errorMsg })
-      if (runData.id) {
-        await updateRun(runData.id, { status: 'failed' })
-      }
+  const stopPolling = useCallback(() => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current)
+      pollingRef.current = null
     }
   }, [])
 
-  const cancel = useCallback(() => {
-    cancelledRef.current = true
-    dispatch({ type: 'SET_STAGE', stage: 'done' })
-    if (state.runId) {
-      updateRun(state.runId, { status: 'cancelled' })
+  const poll = useCallback(async (runId: string) => {
+    try {
+      const [runRes, leadsRes] = await Promise.all([
+        fetch('/api/pipeline'),
+        fetch(`/api/pipeline/leads?runId=${runId}`),
+      ])
+
+      if (!runRes.ok || !leadsRes.ok) return
+
+      const runs = await runRes.json()
+      const { leads: dbLeads } = await leadsRes.json()
+
+      const run = (runs as Array<{ id: string }>).find((r) => r.id === runId) as
+        | (Record<string, unknown> & { id: string; stage: string; status: string })
+        | undefined
+
+      if (!run) return
+
+      const leadStates: PipelineLeadState[] = (dbLeads ?? []).map(dbLeadToState)
+
+      const errorCount = leadStates.filter((l) => l.status === 'error').length
+      const analyzedCount = leadStates.filter((l) =>
+        ['analyzed', 'generating_site', 'site_generated', 'generating_message', 'message_ready', 'sending', 'sent'].includes(l.status)
+      ).length
+      const sitesCount = leadStates.filter((l) =>
+        ['site_generated', 'generating_message', 'message_ready', 'sending', 'sent'].includes(l.status)
+      ).length
+      const messagesCount = leadStates.filter((l) =>
+        ['message_ready', 'sending', 'sent'].includes(l.status)
+      ).length
+      const sentCount = leadStates.filter((l) => l.status === 'sent').length
+
+      dispatch({
+        type: 'SYNC',
+        stage: (run.stage as PipelineStage) || 'searching',
+        leads: leadStates,
+        progress: {
+          searched: 0,
+          imported: leadStates.length,
+          analyzed: analyzedCount,
+          sitesGenerated: sitesCount,
+          messagesGenerated: messagesCount,
+          sent: sentCount,
+          errors: errorCount,
+        },
+      })
+
+      // Stop polling when done
+      if (['completed', 'failed', 'cancelled'].includes(run.status as string)) {
+        const finalStage = run.status === 'completed' ? 'done'
+          : run.status === 'cancelled' ? 'done'
+          : 'error'
+        dispatch({ type: 'DONE', stage: finalStage as PipelineStage })
+        return true // signal to stop
+      }
+
+      return false
+    } catch {
+      // Network error, keep polling
+      return false
     }
+  }, [])
+
+  const startPolling = useCallback((runId: string) => {
+    stopPolling()
+
+    // Initial poll immediately
+    poll(runId).then((done) => {
+      if (done) return
+    })
+
+    pollingRef.current = setInterval(async () => {
+      const done = await poll(runId)
+      if (done) stopPolling()
+    }, POLL_INTERVAL)
+  }, [poll, stopPolling])
+
+  // Check for active run on mount (resume after tab close)
+  useEffect(() => {
+    let cancelled = false
+
+    async function checkActiveRun() {
+      try {
+        const res = await fetch('/api/pipeline')
+        if (!res.ok) return
+        const runs = await res.json()
+        const active = (runs as Array<{ id: string; status: string }>).find(
+          (r) => r.status === 'running'
+        )
+        if (active && !cancelled) {
+          dispatch({ type: 'RESUMING', runId: active.id })
+          startPolling(active.id)
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    checkActiveRun()
+    return () => {
+      cancelled = true
+    }
+  }, [startPolling])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => stopPolling()
+  }, [stopPolling])
+
+  const run = useCallback(async (config: PipelineConfig) => {
+    // POST to server-side pipeline
+    const res = await fetch('/api/pipeline/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    })
+
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error)
+
+    dispatch({ type: 'START', runId: data.id })
+    startPolling(data.id)
+  }, [startPolling])
+
+  const cancel = useCallback(async () => {
+    if (state.runId) {
+      await fetch('/api/pipeline', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: state.runId, status: 'cancelled' }),
+      })
+    }
+    // Polling will pick up the cancelled status
   }, [state.runId])
 
   return {
@@ -448,6 +253,9 @@ export function usePipeline() {
     run,
     cancel,
     isRunning: !['idle', 'done', 'error'].includes(state.stage),
-    reset: () => dispatch({ type: 'RESET' }),
+    reset: () => {
+      stopPolling()
+      dispatch({ type: 'RESET' })
+    },
   }
 }

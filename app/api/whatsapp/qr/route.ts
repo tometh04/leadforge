@@ -1,6 +1,11 @@
 import { NextResponse } from 'next/server'
-import makeWASocket, { fetchLatestBaileysVersion } from '@whiskeysockets/baileys'
+import makeWASocket, {
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+} from '@whiskeysockets/baileys'
+import { Boom } from '@hapi/boom'
 import { useSupabaseAuthState } from '@/lib/whatsapp/auth-state'
+import { createClient } from '@/lib/supabase/server'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,49 +15,91 @@ export async function GET() {
 
   const stream = new ReadableStream({
     async start(controller) {
+      let closed = false
       function send(event: string, data: unknown) {
+        if (closed) return
         controller.enqueue(
           encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
         )
       }
+      function close() {
+        if (closed) return
+        closed = true
+        controller.close()
+      }
 
       try {
-        const { state, saveCreds } = await useSupabaseAuthState()
+        // Clear stale credentials so Baileys generates a fresh QR
+        const supabase = await createClient()
+        await supabase.from('whatsapp_auth').delete().neq('id', '')
+
         const { version } = await fetchLatestBaileysVersion()
 
-        const sock = makeWASocket({
-          version,
-          auth: state,
-          printQRInTerminal: false,
-          generateHighQualityLinkPreview: false,
-        })
-        socketRef = sock
+        async function connectSocket() {
+          // Re-read auth state each time (picks up creds saved after QR scan)
+          const { state, saveCreds } = await useSupabaseAuthState()
 
-        sock.ev.on('creds.update', saveCreds)
+          const sock = makeWASocket({
+            version,
+            auth: state,
+            printQRInTerminal: false,
+            generateHighQualityLinkPreview: false,
+          })
+          socketRef = sock
 
-        sock.ev.on('connection.update', (update) => {
-          const { connection, qr } = update
+          sock.ev.on('creds.update', saveCreds)
 
-          if (qr) {
-            send('qr', { qr })
-          }
+          sock.ev.on('connection.update', async (update) => {
+            const { connection, qr, lastDisconnect } = update
 
-          if (connection === 'open') {
-            send('connected', { success: true })
-            sock.end(undefined)
-            controller.close()
-          }
+            if (qr) {
+              send('qr', { qr })
+            }
 
-          if (connection === 'close') {
-            send('error', { error: 'Conexión cerrada' })
-            controller.close()
-          }
-        })
+            if (connection === 'open') {
+              send('connected', { success: true })
+              // Let Baileys finish initial sync (pre-keys, history) before closing
+              setTimeout(() => {
+                sock.end(undefined)
+                close()
+              }, 15000)
+            }
+
+            if (connection === 'close') {
+              const statusCode = (lastDisconnect?.error as Boom)?.output
+                ?.statusCode
+
+              if (
+                statusCode === DisconnectReason.loggedOut ||
+                statusCode === DisconnectReason.forbidden
+              ) {
+                send('error', {
+                  error: 'Sesión rechazada — intentar de nuevo',
+                })
+                close()
+              } else if (
+                statusCode === DisconnectReason.restartRequired ||
+                statusCode === DisconnectReason.timedOut
+              ) {
+                // After QR scan, Baileys requires a reconnect with saved creds
+                sock.end(undefined)
+                await connectSocket()
+              } else {
+                send('error', {
+                  error: `Conexión cerrada (código: ${statusCode})`,
+                })
+                close()
+              }
+            }
+          })
+        }
+
+        await connectSocket()
       } catch (err) {
         send('error', {
           error: err instanceof Error ? err.message : 'Error desconocido',
         })
-        controller.close()
+        close()
       }
     },
     cancel() {
