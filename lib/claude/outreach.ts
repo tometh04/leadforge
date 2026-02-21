@@ -1,4 +1,5 @@
 import { getAnthropicClient } from './client'
+import { withAnthropicRateLimitRetry } from './retry'
 
 export async function generateWhatsAppMessage(
   businessName: string,
@@ -25,11 +26,13 @@ El mensaje debe:
 
 Respondé ÚNICAMENTE con el texto del mensaje, sin comillas, sin explicaciones.`
 
-  const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5',
-    max_tokens: 512,
-    messages: [{ role: 'user', content: prompt }],
-  })
+  const message = await withAnthropicRateLimitRetry('generateWhatsAppMessage', () =>
+    anthropic.messages.create({
+      model: 'claude-haiku-4-5',
+      max_tokens: 220,
+      messages: [{ role: 'user', content: prompt }],
+    })
+  )
 
   return message.content[0].type === 'text' ? message.content[0].text.trim() : ''
 }

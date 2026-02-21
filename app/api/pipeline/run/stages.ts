@@ -4,6 +4,7 @@ import { quickLeadFilter, analyzeWebsite } from '@/lib/claude/scoring'
 import { scrapeSite } from '@/lib/scraper/site-scraper'
 import { generateSiteHTML, slugify, ScrapedBusinessData } from '@/lib/claude/site-generator'
 import { generateWhatsAppMessage, buildDefaultMessage } from '@/lib/claude/outreach'
+import { isAnthropicRateLimitError } from '@/lib/claude/retry'
 import { createWhatsAppSocket, waitForConnection, formatPhoneToJid } from '@/lib/whatsapp/client'
 import type { ScraperResult } from '@/types'
 
@@ -60,7 +61,10 @@ export async function triggerNextStage(
     } catch (err) {
       console.error(`[triggerNextStage] Attempt ${attempt + 1} error:`, err)
     }
-    if (attempt < 2) await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
+    if (attempt < 2) {
+      const delayMs = [2000, 5000][attempt] ?? 10000
+      await new Promise((r) => setTimeout(r, delayMs))
+    }
   }
   throw new Error(`Failed to trigger stage "${stage}" after 3 attempts`)
 }
@@ -145,6 +149,16 @@ export async function processStage(runId: string, stage: string, fromPhase: 'a' 
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : 'Error desconocido'
+
+    if (isAnthropicRateLimitError(err)) {
+      console.warn(`[pipeline/stages] Rate limit in stage ${stage}. Keeping run active for retry.`)
+      await supabase
+        .from('pipeline_runs')
+        .update({ status: 'running', updated_at: new Date().toISOString() })
+        .eq('id', runId)
+      return
+    }
+
     console.error(`[pipeline/stages] Fatal error in stage ${stage}:`, errMsg)
     await supabase
       .from('pipeline_runs')
@@ -427,7 +441,7 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
       return
     }
 
-    await updatePipelineLead(pl.id, { status: 'generating_site' })
+    await updatePipelineLead(pl.id, { status: 'generating_site', error: null })
 
     try {
       const { data: lead } = await supabase
@@ -557,12 +571,19 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
       sitesCount++
       await updateRun({ sites_generated: sitesCount })
     } catch (err) {
+      if (isAnthropicRateLimitError(err)) {
+        await updatePipelineLead(pl.id, {
+          status: 'pending',
+          error: 'Rate limit de IA. Reintentando automáticamente.',
+        })
+        throw err
+      }
       const errMsg = err instanceof Error ? err.message : 'Error generando sitio'
       await updatePipelineLead(pl.id, { status: 'error', error: errMsg })
     }
   }
 
-  await pMap(freshPLeads ?? [], processLead, 3)
+  await pMap(freshPLeads ?? [], processLead, 1)
 
   if (cancelled) return
 
@@ -592,7 +613,7 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig, from
     if (!pl.phone) return
     if (pl.status === 'skipped' || pl.status === 'error') return
 
-    await updatePipelineLead(pl.id, { status: 'generating_message' })
+    await updatePipelineLead(pl.id, { status: 'generating_message', error: null })
 
     try {
       const { data: lead } = await supabase
@@ -614,19 +635,27 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig, from
           lead.address ?? '',
           lead.generated_site_url
         )
-      } catch {
+      } catch (err) {
+        if (isAnthropicRateLimitError(err)) throw err
         message = buildDefaultMessage(lead.business_name, lead.generated_site_url)
       }
 
       await updatePipelineLead(pl.id, { status: 'message_ready', message })
       messagesCount++
     } catch (err) {
+      if (isAnthropicRateLimitError(err)) {
+        await updatePipelineLead(pl.id, {
+          status: 'pending',
+          error: 'Rate limit de IA. Reintentando automáticamente.',
+        })
+        throw err
+      }
       const errMsg = err instanceof Error ? err.message : 'Error generando mensaje'
       await updatePipelineLead(pl.id, { status: 'error', error: errMsg })
     }
   }
 
-  await pMap(freshPLeads ?? [], processLead, 5)
+  await pMap(freshPLeads ?? [], processLead, 1)
 
   if (cancelled) return
 

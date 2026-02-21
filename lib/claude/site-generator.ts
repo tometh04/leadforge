@@ -1,5 +1,6 @@
 import { getAnthropicClient } from './client'
 import { SITE_REFERENCE_HTML } from './site-reference'
+import { withAnthropicRateLimitRetry } from './retry'
 
 export interface ScrapedBusinessData {
   visibleText?: string
@@ -189,13 +190,14 @@ ${SITE_REFERENCE_HTML}
 
 Generá el HTML completo ahora. Sin explicaciones, sin markdown, sin bloques de código. Empezá directamente con <!DOCTYPE html>.`
 
-  const stream = anthropic.messages.stream({
-    model: 'claude-sonnet-4-6',
-    max_tokens: 24000,
-    messages: [{ role: 'user', content: prompt }],
+  const message = await withAnthropicRateLimitRetry('generateSiteHTML', async () => {
+    const stream = anthropic.messages.stream({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 3000,
+      messages: [{ role: 'user', content: prompt }],
+    })
+    return stream.finalMessage()
   })
-
-  const message = await stream.finalMessage()
   const text = message.content[0].type === 'text' ? message.content[0].text : ''
 
   // Extraer el HTML de la respuesta
