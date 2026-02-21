@@ -89,6 +89,7 @@ export interface PipelineRun {
   messages_sent: number
   errors: Array<{ leadId: string; step: string; error: string }>
   completed_at: string | null
+  updated_at: string
 }
 
 export type PipelineStage =
