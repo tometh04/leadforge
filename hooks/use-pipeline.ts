@@ -113,6 +113,8 @@ const POLL_INTERVAL = 3000
 
 export function usePipeline() {
   const [state, dispatch] = useReducer(reducer, initialState)
+  const stateRef = useRef(state)
+  stateRef.current = state
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const stopPolling = useCallback(() => {
@@ -140,7 +142,14 @@ export function usePipeline() {
 
       if (!run) return
 
-      const leadStates: PipelineLeadState[] = (dbLeads ?? []).map(dbLeadToState)
+      const prevLeads = stateRef.current.leads
+      const leadStates: PipelineLeadState[] = (dbLeads ?? []).map((row: PipelineLeadRow) => {
+        const mapped = dbLeadToState(row)
+        const prev = prevLeads.find((p) => p.leadId === mapped.leadId)
+        mapped.updatedAt =
+          prev && prev.status === mapped.status ? prev.updatedAt : Date.now()
+        return mapped
+      })
 
       const errorCount = leadStates.filter((l) => l.status === 'error').length
       const analyzedCount = leadStates.filter((l) =>

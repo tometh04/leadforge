@@ -128,6 +128,7 @@ export interface PipelineLeadState {
     | 'skipped'
     | 'error'
   score?: number
+  updatedAt?: number
   siteUrl?: string
   message?: string
   error?: string

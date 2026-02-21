@@ -75,6 +75,24 @@ function stageIndex(stage: PipelineStage): number {
   return idx
 }
 
+const ACTIVE_STATUSES = ['analyzing', 'generating_site', 'generating_message', 'sending']
+
+function ElapsedTimer({ since }: { since: number }) {
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  const seconds = Math.floor((now - since) / 1000)
+  const min = Math.floor(seconds / 60)
+  const sec = seconds % 60
+  return (
+    <span className="text-xs tabular-nums text-muted-foreground">
+      {min > 0 ? `${min}m ${sec}s` : `${sec}s`}
+    </span>
+  )
+}
+
 function LeadStatusBadge({ status }: { status: PipelineLeadState['status'] }) {
   const variants: Record<string, { label: string; className: string }> = {
     pending: { label: 'Pendiente', className: 'bg-muted text-muted-foreground' },
@@ -431,7 +449,12 @@ export default function AutopilotPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        <LeadStatusBadge status={lead.status} />
+                        <div className="flex items-center gap-2">
+                          <LeadStatusBadge status={lead.status} />
+                          {ACTIVE_STATUSES.includes(lead.status) && lead.updatedAt && (
+                            <ElapsedTimer since={lead.updatedAt} />
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="max-w-[200px] truncate text-xs text-red-500">
                         {lead.error || ''}
