@@ -41,6 +41,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { usePipeline } from '@/hooks/use-pipeline'
+import { LeadCardModal } from '@/components/leads/LeadCardModal'
+import type { Lead, LeadActivity } from '@/types'
 import type { PipelineStage, PipelineLeadState, PipelineRun, PipelineLeadRow } from '@/types'
 
 const NICHES = [
@@ -135,6 +137,10 @@ export default function AutopilotPage() {
   const [skipMessages, setSkipMessages] = useState(false)
   const [skipSending, setSkipSending] = useState(false)
   const [whatsappPaired, setWhatsappPaired] = useState<boolean | null>(null)
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
+  const [selectedActivity, setSelectedActivity] = useState<LeadActivity[]>([])
+  const [modalOpen, setModalOpen] = useState(false)
+  const [loadingLead, setLoadingLead] = useState<string | null>(null)
 
   useEffect(() => {
     fetch('/api/whatsapp/status')
@@ -142,6 +148,25 @@ export default function AutopilotPage() {
       .then((d) => setWhatsappPaired(d.paired))
       .catch(() => setWhatsappPaired(false))
   }, [])
+
+  const handleRowClick = async (leadId: string) => {
+    setLoadingLead(leadId)
+    try {
+      const [leadRes, activityRes] = await Promise.all([
+        fetch(`/api/leads/${leadId}`),
+        fetch(`/api/leads/${leadId}/activity`),
+      ])
+      const leadData = await leadRes.json()
+      const activityData = await activityRes.json()
+      setSelectedLead(leadData)
+      setSelectedActivity(Array.isArray(activityData) ? activityData : [])
+      setModalOpen(true)
+    } catch {
+      toast.error('No se pudo cargar el detalle del lead')
+    } finally {
+      setLoadingLead(null)
+    }
+  }
 
   const handleRun = async () => {
     if (!niche.trim() || !city.trim()) {
@@ -488,8 +513,19 @@ export default function AutopilotPage() {
                 </TableHeader>
                 <TableBody>
                   {state.leads.map((lead, i) => (
-                    <TableRow key={lead.leadId || i}>
-                      <TableCell className="font-medium">{lead.businessName}</TableCell>
+                    <TableRow
+                      key={lead.leadId || i}
+                      className="cursor-pointer hover:bg-muted/50"
+                      onClick={() => lead.leadId && handleRowClick(lead.leadId)}
+                    >
+                      <TableCell className="font-medium">
+                        <span className="flex items-center gap-2">
+                          {lead.businessName}
+                          {loadingLead === lead.leadId && (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                          )}
+                        </span>
+                      </TableCell>
                       <TableCell className="text-sm">{lead.phone || '—'}</TableCell>
                       <TableCell className="text-center">
                         {lead.score ? (
@@ -538,6 +574,19 @@ export default function AutopilotPage() {
           </CardContent>
         </Card>
       )}
+
+      <LeadCardModal
+        lead={selectedLead}
+        activity={selectedActivity}
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onUpdate={(updated) => setSelectedLead(updated)}
+        onAnalyze={async () => {}}
+        analyzing={false}
+        onGenerateSite={() => {}}
+        generatingSite={false}
+        onOpenWhatsApp={() => {}}
+      />
 
       {/* Historial */}
       <PipelineHistory

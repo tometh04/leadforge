@@ -1,9 +1,48 @@
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
+  type WAMessageKey,
+  type proto,
 } from '@whiskeysockets/baileys'
 import { useSupabaseAuthState } from './auth-state'
+import { createServiceClient } from '@/lib/supabase/service'
 import { Boom } from '@hapi/boom'
+
+/**
+ * Looks up the original message text from the DB so Baileys can re-encrypt
+ * it when the recipient requests a retry (Signal key update).
+ */
+async function getMessage(
+  key: WAMessageKey
+): Promise<proto.IMessage | undefined> {
+  try {
+    if (!key.remoteJid) return undefined
+    const digits = key.remoteJid.replace(/\D/g, '')
+    if (!digits) return undefined
+
+    const supabase = createServiceClient()
+    const { data } = await supabase
+      .from('messages')
+      .select('message_body, leads!inner(phone)')
+      .eq('channel', 'whatsapp')
+      .order('sent_at', { ascending: false })
+      .limit(20)
+
+    if (!data?.length) return undefined
+
+    const match = data.find((m: Record<string, unknown>) => {
+      const lead = m.leads as Record<string, unknown> | null
+      const phone = (lead?.phone as string) ?? ''
+      const phoneDigits = phone.replace(/\D/g, '')
+      return phoneDigits && digits.includes(phoneDigits.slice(-10))
+    })
+
+    if (!match?.message_body) return undefined
+    return { conversation: match.message_body as string }
+  } catch {
+    return undefined
+  }
+}
 
 export async function createWhatsAppSocket() {
   const { state, saveCreds } = await useSupabaseAuthState()
@@ -14,6 +53,7 @@ export async function createWhatsAppSocket() {
     auth: state,
     printQRInTerminal: false,
     generateHighQualityLinkPreview: false,
+    getMessage,
   })
 
   sock.ev.on('creds.update', saveCreds)
@@ -34,7 +74,8 @@ export function waitForConnection(
       const { connection, lastDisconnect } = update
       if (connection === 'open') {
         clearTimeout(timer)
-        resolve()
+        // Let Baileys finish pre-key sync before sending messages
+        setTimeout(resolve, 3000)
       } else if (connection === 'close') {
         clearTimeout(timer)
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode

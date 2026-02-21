@@ -2,12 +2,47 @@ import { NextResponse } from 'next/server'
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
+  type WAMessageKey,
+  type proto,
 } from '@whiskeysockets/baileys'
 import { Boom } from '@hapi/boom'
 import { useSupabaseAuthState } from '@/lib/whatsapp/auth-state'
 import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
 
 export const dynamic = 'force-dynamic'
+
+async function getMessageForRetry(
+  key: WAMessageKey
+): Promise<proto.IMessage | undefined> {
+  try {
+    if (!key.remoteJid) return undefined
+    const digits = key.remoteJid.replace(/\D/g, '')
+    if (!digits) return undefined
+
+    const supabase = createServiceClient()
+    const { data } = await supabase
+      .from('messages')
+      .select('message_body, leads!inner(phone)')
+      .eq('channel', 'whatsapp')
+      .order('sent_at', { ascending: false })
+      .limit(20)
+
+    if (!data?.length) return undefined
+
+    const match = data.find((m: Record<string, unknown>) => {
+      const lead = m.leads as Record<string, unknown> | null
+      const phone = (lead?.phone as string) ?? ''
+      const phoneDigits = phone.replace(/\D/g, '')
+      return phoneDigits && digits.includes(phoneDigits.slice(-10))
+    })
+
+    if (!match?.message_body) return undefined
+    return { conversation: match.message_body as string }
+  } catch {
+    return undefined
+  }
+}
 
 export async function GET() {
   const encoder = new TextEncoder()
@@ -44,6 +79,7 @@ export async function GET() {
             auth: state,
             printQRInTerminal: false,
             generateHighQualityLinkPreview: false,
+            getMessage: getMessageForRetry,
           })
           socketRef = sock
 
