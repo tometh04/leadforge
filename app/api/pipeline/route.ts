@@ -4,6 +4,15 @@ import { createClient } from '@/lib/supabase/server'
 export async function GET() {
   try {
     const supabase = await createClient()
+
+    // Auto-fail runs stuck for more than 6 minutes (no updated_at progress)
+    const sixMinAgo = new Date(Date.now() - 6 * 60 * 1000).toISOString()
+    await supabase
+      .from('pipeline_runs')
+      .update({ status: 'failed', stage: 'error' })
+      .eq('status', 'running')
+      .lt('updated_at', sixMinAgo)
+
     const { data, error } = await supabase
       .from('pipeline_runs')
       .select('*')

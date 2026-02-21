@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS whatsapp_auth (
 CREATE TABLE IF NOT EXISTS pipeline_runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
   niche text NOT NULL,
   city text NOT NULL,
   status text DEFAULT 'running' CHECK (status IN ('running','completed','failed','cancelled')),
@@ -92,6 +93,20 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
   errors jsonb DEFAULT '[]',
   completed_at timestamptz
 );
+
+-- Auto-update updated_at on every row change
+CREATE OR REPLACE FUNCTION update_pipeline_runs_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_pipeline_runs_updated_at
+  BEFORE UPDATE ON pipeline_runs
+  FOR EACH ROW
+  EXECUTE FUNCTION update_pipeline_runs_updated_at();
 
 -- RLS (Row Level Security) — desactivado para MVP single-user
 ALTER TABLE leads DISABLE ROW LEVEL SECURITY;

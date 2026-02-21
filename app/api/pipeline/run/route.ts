@@ -66,7 +66,10 @@ async function processPipeline(runId: string, config: PipelineConfig) {
   const supabase = createServiceClient()
 
   const updateRun = async (updates: Record<string, unknown>) => {
-    await supabase.from('pipeline_runs').update(updates).eq('id', runId)
+    await supabase
+      .from('pipeline_runs')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', runId)
   }
 
   const updatePipelineLead = async (plId: string, updates: Record<string, unknown>) => {

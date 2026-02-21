@@ -131,6 +131,20 @@ export function usePipeline() {
 
       if (!run) return
 
+      // Client-side staleness fallback: if running for more than 10 minutes, treat as failed
+      const createdAt = run.created_at as string | undefined
+      if (
+        run.status === 'running' &&
+        createdAt &&
+        Date.now() - new Date(createdAt).getTime() > 10 * 60 * 1000
+      ) {
+        dispatch({
+          type: 'SET_ERROR',
+          error: 'El pipeline excedió el tiempo máximo de ejecución. Intenta de nuevo.',
+        })
+        return true // stop polling
+      }
+
       const leadStates: PipelineLeadState[] = (dbLeads ?? []).map(dbLeadToState)
 
       const errorCount = leadStates.filter((l) => l.status === 'error').length
