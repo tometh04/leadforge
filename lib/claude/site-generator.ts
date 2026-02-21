@@ -386,7 +386,8 @@ export async function checkSiteGeneratorHealth(timeoutMs = 15_000): Promise<Site
       .trim()
       .slice(0, 140)
     if (!preview) {
-      throw new Error('El modelo respondió sin contenido de texto')
+      const raw = JSON.stringify(payload).slice(0, 500)
+      throw new Error(`El modelo respondió sin contenido de texto. Raw: ${raw}`)
     }
 
     return {
