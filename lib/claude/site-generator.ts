@@ -45,6 +45,7 @@ type OpenAICompatibleConfig = {
   model: string
   requestUrl: string
   headers: Record<string, string>
+  useResponsesApi: boolean
 }
 
 export interface SiteGeneratorRuntimeInfo {
@@ -95,6 +96,19 @@ function openAICompatibleCompletionsUrl(baseUrlRaw: string): string {
   return `${baseUrl}/v1/chat/completions`
 }
 
+function openAIResponsesUrl(baseUrlRaw: string): string {
+  const baseUrl = baseUrlRaw.replace(/\/+$/, '')
+
+  if (baseUrl.endsWith('/responses')) return baseUrl
+  if (baseUrl.endsWith('/v1')) return `${baseUrl}/responses`
+  return `${baseUrl}/v1/responses`
+}
+
+function isResponsesApiModel(model: string): boolean {
+  const lower = model.toLowerCase()
+  return lower.startsWith('gpt-5') || lower.includes('codex')
+}
+
 function getOpenAICompatibleModel(): string {
   return process.env.SITE_GENERATOR_MODEL?.trim() || 'gpt-5-codex'
 }
@@ -115,7 +129,11 @@ function buildOpenAICompatibleConfig(): OpenAICompatibleConfig {
   const model = getOpenAICompatibleModel()
   const baseUrl =
     process.env.SITE_GENERATOR_BASE_URL?.trim() ?? process.env.OPENROUTER_BASE_URL?.trim()
-  const requestUrl = openAICompatibleCompletionsUrl(baseUrl || 'https://api.openai.com/v1')
+  const resolvedBase = baseUrl || 'https://api.openai.com/v1'
+  const useResponsesApi = isResponsesApiModel(model)
+  const requestUrl = useResponsesApi
+    ? openAIResponsesUrl(resolvedBase)
+    : openAICompatibleCompletionsUrl(resolvedBase)
   const isOpenRouter = requestUrl.includes('openrouter.ai')
 
   const headers: Record<string, string> = {
@@ -129,7 +147,7 @@ function buildOpenAICompatibleConfig(): OpenAICompatibleConfig {
     headers['X-Title'] = process.env.OPENROUTER_APP_TITLE?.trim() || 'LeadForge'
   }
 
-  return { model, requestUrl, headers }
+  return { model, requestUrl, headers, useResponsesApi }
 }
 
 function getAnthropicSiteGeneratorModel(): string {
@@ -143,6 +161,26 @@ function createTimeoutSignal(timeoutMs: number): { signal: AbortSignal; cleanup:
     signal: controller.signal,
     cleanup: () => clearTimeout(id),
   }
+}
+
+function extractResponsesApiText(payload: unknown): string {
+  const data = toObject(payload)
+
+  // Convenience field available on newer API versions
+  if (typeof data.output_text === 'string' && data.output_text) return data.output_text
+
+  // Fallback: traverse output[i].content[j].text
+  const output = Array.isArray(data.output) ? data.output : []
+  const parts: string[] = []
+  for (const item of output) {
+    const itemObj = toObject(item)
+    const content = Array.isArray(itemObj.content) ? itemObj.content : []
+    for (const block of content) {
+      const blockObj = toObject(block)
+      if (typeof blockObj.text === 'string') parts.push(blockObj.text)
+    }
+  }
+  return parts.join('\n').trim()
 }
 
 function extractOpenAIText(payload: unknown): string {
@@ -198,19 +236,18 @@ async function generateWithAnthropic(prompt: string): Promise<string> {
 }
 
 async function generateWithOpenAICompatible(prompt: string): Promise<string> {
-  const { model, requestUrl, headers } = buildOpenAICompatibleConfig()
+  const { model, requestUrl, headers, useResponsesApi } = buildOpenAICompatibleConfig()
   const maxTokens = parseMaxTokens(12_000)
 
   return withAnthropicRateLimitRetry('generateSiteHTML', async () => {
+    const body = useResponsesApi
+      ? { model, input: prompt, max_output_tokens: maxTokens }
+      : { model, max_tokens: maxTokens, temperature: 0.4, messages: [{ role: 'user', content: prompt }] }
+
     const response = await fetch(requestUrl, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        model,
-        max_tokens: maxTokens,
-        temperature: 0.4,
-        messages: [{ role: 'user', content: prompt }],
-      }),
+      body: JSON.stringify(body),
     })
 
     const payload = (await response.json().catch(() => ({}))) as unknown
@@ -225,6 +262,17 @@ async function generateWithOpenAICompatible(prompt: string): Promise<string> {
       err.headers = response.headers
       err.response = { status: response.status, headers: response.headers, data: payload }
       throw err
+    }
+
+    if (useResponsesApi) {
+      const data = toObject(payload)
+      if (data.status === 'incomplete') {
+        const details = toObject(data.incomplete_details)
+        console.warn(
+          `[site-generator] Output truncated (status=incomplete, reason=${details.reason ?? 'unknown'})`
+        )
+      }
+      return extractResponsesApiText(payload)
     }
 
     const payloadObj = toObject(payload)
@@ -266,7 +314,10 @@ export function getSiteGeneratorRuntimeInfo(): SiteGeneratorRuntimeInfo {
   const model = getOpenAICompatibleModel()
   const baseUrl =
     process.env.SITE_GENERATOR_BASE_URL?.trim() ?? process.env.OPENROUTER_BASE_URL?.trim()
-  const endpoint = openAICompatibleCompletionsUrl(baseUrl || 'https://api.openai.com/v1')
+  const resolvedBase = baseUrl || 'https://api.openai.com/v1'
+  const endpoint = isResponsesApiModel(model)
+    ? openAIResponsesUrl(resolvedBase)
+    : openAICompatibleCompletionsUrl(resolvedBase)
 
   return {
     provider,
@@ -307,20 +358,19 @@ export async function checkSiteGeneratorHealth(timeoutMs = 15_000): Promise<Site
     }
   }
 
-  const { model, requestUrl, headers } = buildOpenAICompatibleConfig()
+  const { model, requestUrl, headers, useResponsesApi } = buildOpenAICompatibleConfig()
   const { signal, cleanup } = createTimeoutSignal(timeoutMs)
 
   try {
+    const body = useResponsesApi
+      ? { model, input: 'Respond only with: OK', max_output_tokens: 32 }
+      : { model, max_tokens: 32, temperature: 0, messages: [{ role: 'user', content: 'Respond only with: OK' }] }
+
     const response = await fetch(requestUrl, {
       method: 'POST',
       headers,
       signal,
-      body: JSON.stringify({
-        model,
-        max_tokens: 32,
-        temperature: 0,
-        messages: [{ role: 'user', content: 'Respond only with: OK' }],
-      }),
+      body: JSON.stringify(body),
     })
 
     const payload = (await response.json().catch(() => ({}))) as unknown
@@ -332,7 +382,9 @@ export async function checkSiteGeneratorHealth(timeoutMs = 15_000): Promise<Site
       throw new Error(`[site-generator/health] ${errorMessage}`)
     }
 
-    const preview = extractOpenAIText(payload).trim().slice(0, 140)
+    const preview = (useResponsesApi ? extractResponsesApiText(payload) : extractOpenAIText(payload))
+      .trim()
+      .slice(0, 140)
     if (!preview) {
       throw new Error('El modelo respondió sin contenido de texto')
     }
