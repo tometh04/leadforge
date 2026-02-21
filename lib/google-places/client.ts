@@ -123,7 +123,7 @@ export async function searchPlaces(
         place_id: place.id,
         business_name: place.displayName?.text ?? 'Sin nombre',
         address: place.formattedAddress ?? '',
-        phone: place.nationalPhoneNumber ?? place.internationalPhoneNumber ?? '',
+        phone: place.internationalPhoneNumber ?? place.nationalPhoneNumber ?? '',
         website: place.websiteUri,
         rating: place.rating ?? null,
         category: place.primaryTypeDisplayName?.text ?? niche,

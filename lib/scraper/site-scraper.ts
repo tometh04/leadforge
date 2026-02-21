@@ -92,9 +92,12 @@ function parsePageContent(html: string, baseUrl: string): ParsedPageContent {
     imageUrls.push(resolved)
   })
 
-  // Teléfonos
+  // Teléfonos (filtrar 0800, 0810, 0600 y similares)
   const phoneRegex = /(?:\+54|0)?\s*[\d\s\-().]{8,15}/g
-  const phoneNumbers = [...(visibleText.match(phoneRegex) ?? [])].slice(0, 3)
+  const tollFreeRegex = /^0?\s*[86]00/
+  const phoneNumbers = [...(visibleText.match(phoneRegex) ?? [])]
+    .filter((p) => !tollFreeRegex.test(p.trim()))
+    .slice(0, 3)
 
   // Emails
   const emailRegex = /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g
