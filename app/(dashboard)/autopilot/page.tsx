@@ -16,6 +16,7 @@ import {
   SkipForward,
   ChevronDown,
   Clock,
+  RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -112,7 +113,7 @@ function LeadStatusBadge({ status }: { status: PipelineLeadState['status'] }) {
 }
 
 export default function AutopilotPage() {
-  const { state, run, cancel, isRunning, reset } = usePipeline()
+  const { state, run, cancel, retry, isRunning, reset } = usePipeline()
   const [niche, setNiche] = useState('')
   const [city, setCity] = useState('')
   const [maxResults, setMaxResults] = useState(20)
@@ -264,7 +265,26 @@ export default function AutopilotPage() {
                   <XCircle className="h-4 w-4" />
                   Cancelar
                 </Button>
-              ) : state.stage === 'done' || state.stage === 'error' ? (
+              ) : state.stage === 'error' ? (
+                <div className="flex w-full gap-2">
+                  <Button
+                    onClick={async () => {
+                      try {
+                        await retry(state.runId!)
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : 'Error al reintentar')
+                      }
+                    }}
+                    className="flex-1 gap-2"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                    Reintentar
+                  </Button>
+                  <Button onClick={reset} variant="outline" className="flex-1 gap-2">
+                    Nueva ejecución
+                  </Button>
+                </div>
+              ) : state.stage === 'done' ? (
                 <Button onClick={reset} variant="outline" className="w-full gap-2">
                   Nueva ejecución
                 </Button>

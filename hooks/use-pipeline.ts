@@ -256,6 +256,18 @@ export function usePipeline() {
     startPolling(data.id)
   }, [startPolling])
 
+  const retry = useCallback(async (runId: string) => {
+    const res = await fetch('/api/pipeline/retry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runId }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error)
+    dispatch({ type: 'RESUMING', runId })
+    startPolling(runId)
+  }, [startPolling])
+
   const cancel = useCallback(async () => {
     if (state.runId) {
       await fetch('/api/pipeline', {
@@ -271,6 +283,7 @@ export function usePipeline() {
     state,
     run,
     cancel,
+    retry,
     isRunning: !['idle', 'done', 'error'].includes(state.stage),
     reset: () => {
       stopPolling()
