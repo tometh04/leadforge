@@ -557,7 +557,7 @@ async function stageAnalyze(runId: string, config: PipelineConfig, fromPhase: 'a
 // ─── Stage: Generate Sites ──────────────────────────────────────────────────────
 
 async function stageGenerateSites(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
-  const SITE_GEN_BATCH_SIZE = 5
+  const SITE_GEN_BATCH_SIZE = 2
 
   const { supabase, updateRun, updatePipelineLead, isCancelled, reportError } = createRunHelpers(
     runId,
@@ -570,6 +570,14 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
     .from('pipeline_leads')
     .select('*')
     .eq('run_id', runId)
+
+  // Reset orphaned leads from a killed previous execution
+  const orphaned = (allPLeads ?? []).filter((pl) => pl.status === 'generating_site')
+  for (const pl of orphaned) {
+    await updatePipelineLead(pl.id, { status: 'analyzed', error: null })
+    // Also update the in-memory array so the rest of the function sees correct statuses
+    pl.status = 'analyzed'
+  }
 
   // Count already-generated sites so the counter stays accurate across batches
   const alreadyGenerated = (allPLeads ?? []).filter(
@@ -766,9 +774,21 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
 
   if (cancelled) return
 
-  // Check if there are remaining leads that still need site generation
-  const remainingLeads = pendingLeads.length - batch.length
-  if (remainingLeads > 0) {
+  // Re-query remaining leads from DB after batch completes (pre-batch counts are stale)
+  const { data: freshAfterBatch } = await supabase
+    .from('pipeline_leads')
+    .select('id, status')
+    .eq('run_id', runId)
+
+  const stillPending = (freshAfterBatch ?? []).filter(
+    (pl) =>
+      pl.status !== 'site_generated' &&
+      pl.status !== 'skipped' &&
+      pl.status !== 'error' &&
+      pl.status !== 'generating_site'
+  ).length
+
+  if (stillPending > 0) {
     // Self-chain: trigger the same stage again for the next batch
     await triggerNextStage(runId, 'generate_sites', fromPhase)
   } else {
