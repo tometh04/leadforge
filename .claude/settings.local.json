@@ -5,7 +5,14 @@
       "Bash(npx supabase migration new:*)",
       "Bash(curl:*)",
       "Bash(git push:*)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(npx tsx:*)",
+      "Bash(node:*)",
+      "Bash(npx supabase db push:*)",
+      "Bash(npx tsc:*)",
+      "Bash(ls:*)",
+      "Bash(railway service --help:*)",
+      "Bash(railway up --help:*)"
     ]
   }
 }
