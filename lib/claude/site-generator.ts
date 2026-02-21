@@ -96,14 +96,16 @@ function openAICompatibleCompletionsUrl(baseUrlRaw: string): string {
 }
 
 function getOpenAICompatibleModel(): string {
-  return process.env.SITE_GENERATOR_MODEL?.trim() || 'qwen/qwen3-coder-30b-a3b-instruct'
+  return process.env.SITE_GENERATOR_MODEL?.trim() || 'gpt-5-codex'
 }
 
 function getOpenAICompatibleApiKey(): string {
   const apiKey =
-    process.env.SITE_GENERATOR_API_KEY?.trim() ?? process.env.OPENROUTER_API_KEY?.trim()
+    process.env.SITE_GENERATOR_API_KEY?.trim() ??
+    process.env.OPENAI_API_KEY?.trim() ??
+    process.env.OPENROUTER_API_KEY?.trim()
   if (!apiKey) {
-    throw new Error('SITE_GENERATOR_API_KEY u OPENROUTER_API_KEY no configurada')
+    throw new Error('SITE_GENERATOR_API_KEY, OPENAI_API_KEY u OPENROUTER_API_KEY no configurada')
   }
   return apiKey
 }
@@ -113,7 +115,7 @@ function buildOpenAICompatibleConfig(): OpenAICompatibleConfig {
   const model = getOpenAICompatibleModel()
   const baseUrl =
     process.env.SITE_GENERATOR_BASE_URL?.trim() ?? process.env.OPENROUTER_BASE_URL?.trim()
-  const requestUrl = openAICompatibleCompletionsUrl(baseUrl || 'https://openrouter.ai/api/v1')
+  const requestUrl = openAICompatibleCompletionsUrl(baseUrl || 'https://api.openai.com/v1')
   const isOpenRouter = requestUrl.includes('openrouter.ai')
 
   const headers: Record<string, string> = {
@@ -264,13 +266,15 @@ export function getSiteGeneratorRuntimeInfo(): SiteGeneratorRuntimeInfo {
   const model = getOpenAICompatibleModel()
   const baseUrl =
     process.env.SITE_GENERATOR_BASE_URL?.trim() ?? process.env.OPENROUTER_BASE_URL?.trim()
-  const endpoint = openAICompatibleCompletionsUrl(baseUrl || 'https://openrouter.ai/api/v1')
+  const endpoint = openAICompatibleCompletionsUrl(baseUrl || 'https://api.openai.com/v1')
 
   return {
     provider,
     model,
     endpoint,
-    hasApiKey: !!(process.env.SITE_GENERATOR_API_KEY ?? process.env.OPENROUTER_API_KEY),
+    hasApiKey: !!(
+      process.env.SITE_GENERATOR_API_KEY ?? process.env.OPENAI_API_KEY ?? process.env.OPENROUTER_API_KEY
+    ),
   }
 }
 

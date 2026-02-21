@@ -44,12 +44,12 @@ Supabase PostgreSQL with three tables: `leads`, `messages`, `lead_activity`. Sch
 
 Anthropic Claude SDK (`@anthropic-ai/sdk`) used for: website quality scoring (1-10 with 8-dimension breakdown), franchise/chain filtering, and personalized outreach messages (WhatsApp/email).
 
-Site generation (`lib/claude/site-generator.ts`) is provider-configurable and defaults to OpenAI-compatible Qwen:
+Site generation (`lib/claude/site-generator.ts`) is provider-configurable and defaults to OpenAI-compatible GPT-5 Codex:
 
 - `SITE_GENERATOR_PROVIDER=openai-compatible` (default)
-- `SITE_GENERATOR_MODEL=qwen/qwen3-coder-30b-a3b-instruct` (default)
-- `SITE_GENERATOR_API_KEY=<token>` (or `OPENROUTER_API_KEY`)
-- `SITE_GENERATOR_BASE_URL=<host>/v1` (optional; defaults to OpenRouter API URL)
+- `SITE_GENERATOR_MODEL=gpt-5-codex` (default)
+- `SITE_GENERATOR_API_KEY=<token>` (or `OPENAI_API_KEY` / `OPENROUTER_API_KEY`)
+- `SITE_GENERATOR_BASE_URL=<host>/v1` (optional; defaults to OpenAI API URL)
 - Optional Anthropic fallback mode for site generation:
   - `SITE_GENERATOR_PROVIDER=anthropic`
   - `SITE_GENERATOR_ANTHROPIC_MODEL=claude-sonnet-4-6`
@@ -69,6 +69,7 @@ NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
 ANTHROPIC_API_KEY
 GOOGLE_PLACES_API_KEY
 SITE_GENERATOR_PROVIDER, SITE_GENERATOR_MODEL, SITE_GENERATOR_API_KEY, SITE_GENERATOR_BASE_URL
+OPENAI_API_KEY
 ```
 
 All config via `process.env` — no `.env.local` fallback pattern.
