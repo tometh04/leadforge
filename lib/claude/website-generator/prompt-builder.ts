@@ -162,6 +162,13 @@ function shouldIncludeSection(
 ): boolean {
   if (rule.alwaysInclude) return true
 
+  // Check if section requires raw text content (context-generatable sections)
+  if (rule.requiresTextContent) {
+    const hasText =
+      data.config?.customInstructions && data.config.customInstructions.length > 200
+    if (!hasText) return false
+  }
+
   for (const field of rule.requiredData) {
     const value = data[field]
     if (value === undefined || value === null) return false

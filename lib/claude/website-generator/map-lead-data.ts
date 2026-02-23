@@ -14,6 +14,7 @@ import type {
   Stat,
   ContactInfo,
   SocialLinks,
+  Service,
 } from './types'
 
 /** Industry-specific default primary color (hex) when no detected color is available. */
@@ -60,6 +61,72 @@ function mapSocialLinks(
     else if (p.includes('whatsapp')) socials.whatsapp = link.url
   }
   return Object.keys(socials).length > 0 ? socials : undefined
+}
+
+const SERVICE_KEYWORDS = [
+  'servicio',
+  'servicios',
+  'tratamiento',
+  'tratamientos',
+  'especialidad',
+  'especialidades',
+  'producto',
+  'productos',
+  'solución',
+  'soluciones',
+  'ofrecemos',
+  'nuestros servicios',
+  'lo que hacemos',
+  'qué hacemos',
+  'áreas de práctica',
+  'menú',
+  'carta',
+  'clases',
+  'programas',
+  'planes',
+  'paquetes',
+]
+
+function extractServicesFromText(
+  visibleText?: string,
+  subPagesText?: string
+): Service[] {
+  const fullText = [visibleText ?? '', subPagesText ?? ''].join('\n')
+  if (fullText.trim().length < 50) return []
+
+  const lines = fullText
+    .split(/\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length >= 3 && l.length <= 80)
+  const lowerFull = fullText.toLowerCase()
+
+  const hasServiceContext = SERVICE_KEYWORDS.some((kw) => lowerFull.includes(kw))
+  if (!hasServiceContext) return []
+
+  const services: string[] = []
+  const seen = new Set<string>()
+
+  for (let i = 0; i < lines.length; i++) {
+    const lower = lines[i].toLowerCase()
+    const isHeader = SERVICE_KEYWORDS.some((kw) => lower.includes(kw))
+    if (!isHeader) continue
+
+    for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+      const candidate = lines[j]
+      const candidateLower = candidate.toLowerCase()
+      if (candidate.includes('.') && candidate.length > 40) continue
+      if (candidate.split(/\s+/).length > 8) continue
+      if (SERVICE_KEYWORDS.some((kw) => candidateLower.includes(kw))) break
+      if (/^(inicio|home|contacto|nosotros|about|blog|copyright|©)/i.test(candidate)) continue
+      const key = candidateLower
+      if (!seen.has(key) && candidate.length >= 3) {
+        seen.add(key)
+        services.push(candidate)
+      }
+    }
+  }
+
+  return services.slice(0, 8).map((title) => ({ title, description: '' }))
 }
 
 export function mapLeadDataToScrapedWebsiteData(
@@ -217,6 +284,27 @@ export function mapLeadDataToScrapedWebsiteData(
   )
   customParts.push('')
 
+  customParts.push('### Secciones generables por contexto')
+  customParts.push(
+    'Las siguientes secciones están incluidas en la lista de generación y DEBEN tener contenido real:'
+  )
+  customParts.push(
+    '- how_it_works: Creá 3 pasos claros del proceso del negocio basándote en su rubro'
+  )
+  customParts.push(
+    '- faq: Generá 6-8 preguntas frecuentes reales del rubro (proceso, precios, confianza, logística, técnica)'
+  )
+  customParts.push(
+    '- before_after: Creá 4-6 comparaciones "sin servicio vs con servicio" relevantes al rubro'
+  )
+  customParts.push(
+    '- logo_marquee: Generá badges con zonas de cobertura, tipos de clientes, o nichos atendidos'
+  )
+  customParts.push(
+    'Estos NO requieren datos extraídos — usá tu conocimiento del rubro para crear contenido genérico pero relevante.'
+  )
+  customParts.push('')
+
   customParts.push('### Guardarailes de rendering (OBLIGATORIO)')
   customParts.push('- El body DEBE tener un background claro (blanco, crema, gris claro)')
   customParts.push('- Todo texto principal debe ser oscuro sobre fondo claro')
@@ -257,6 +345,9 @@ export function mapLeadDataToScrapedWebsiteData(
   )
   customParts.push('Empezá directamente con <!DOCTYPE html>.')
 
+  // --- Extract services from raw text ---
+  const extractedServices = extractServicesFromText(scraped?.visibleText, scraped?.subPagesText)
+
   // --- Primary color ---
   const primaryColor = inferPrimaryColor(
     category,
@@ -275,6 +366,7 @@ export function mapLeadDataToScrapedWebsiteData(
     features: [],
     faqs: [],
     stats,
+    services: extractedServices.length >= 2 ? extractedServices : undefined,
     gallery: gallery.length >= 3 ? gallery : undefined,
     colorPalette: { primary: primaryColor },
     fonts: {},

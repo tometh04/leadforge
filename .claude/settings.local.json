@@ -17,7 +17,8 @@
       "Bash(npx next build)",
       "WebFetch(domain:leadforge-production-8d02.up.railway.app)",
       "Bash(find lib/claude/website-generator -name \"*.ts\" -type f -exec wc -l {} ;)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(grep:*)"
     ]
   }
 }

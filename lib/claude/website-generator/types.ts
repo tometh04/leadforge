@@ -228,6 +228,7 @@ export interface SectionSelectionRule {
   requiredData: (keyof ScrapedWebsiteData)[]
   minItems?: number // minimum items in array to include section
   alwaysInclude?: boolean
+  requiresTextContent?: boolean // include only when raw text content exists in customInstructions
   priority: number // 1 = highest
 }
 
@@ -238,22 +239,25 @@ export const SECTION_RULES: SectionSelectionRule[] = [
   { type: 'footer', requiredData: [], alwaysInclude: true, priority: 1 },
   { type: 'final_cta', requiredData: ['ctas'], alwaysInclude: true, priority: 2 },
 
-  // Content-dependent
+  // Content-dependent (structured data)
   { type: 'features_grid', requiredData: ['features'], minItems: 3, priority: 3 },
   { type: 'testimonials', requiredData: ['testimonials'], minItems: 2, priority: 3 },
   { type: 'pricing', requiredData: ['pricing'], minItems: 1, priority: 3 },
-  { type: 'faq', requiredData: ['faqs'], minItems: 3, priority: 4 },
-  { type: 'stats_counter', requiredData: ['stats'], minItems: 3, priority: 4 },
   { type: 'team', requiredData: ['team'], minItems: 2, priority: 5 },
   { type: 'services', requiredData: ['services'], minItems: 2, priority: 4 },
   { type: 'tools_showcase', requiredData: ['services'], minItems: 3, priority: 5 },
   { type: 'gallery', requiredData: ['gallery'], minItems: 3, priority: 5 },
 
-  // Enhancement sections (no required data, added for quality)
-  { type: 'social_proof', requiredData: ['testimonials'], minItems: 1, priority: 4 },
-  { type: 'how_it_works', requiredData: ['features'], minItems: 3, priority: 5 },
-  { type: 'before_after', requiredData: ['features'], minItems: 4, priority: 6 },
-  { type: 'try_banner', requiredData: ['ctas'], minItems: 1, priority: 6 },
-  { type: 'logo_marquee', requiredData: ['testimonials'], minItems: 1, priority: 7 },
+  // Relaxed thresholds (Google data or context-generatable)
+  { type: 'stats_counter', requiredData: ['stats'], minItems: 1, priority: 4 },
+  { type: 'social_proof', requiredData: ['stats'], minItems: 1, priority: 4 },
   { type: 'contact_form', requiredData: ['contact'], priority: 5 },
+  { type: 'map', requiredData: ['contact'], priority: 6 },
+  { type: 'try_banner', requiredData: ['ctas'], minItems: 1, priority: 6 },
+
+  // Context-generatable (LLM creates from industry + raw text, no structured data needed)
+  { type: 'how_it_works', requiredData: [], requiresTextContent: true, priority: 5 },
+  { type: 'faq', requiredData: [], requiresTextContent: true, priority: 5 },
+  { type: 'before_after', requiredData: [], requiresTextContent: true, priority: 6 },
+  { type: 'logo_marquee', requiredData: [], requiresTextContent: true, priority: 7 },
 ]
