@@ -128,12 +128,25 @@ export function mapLeadDataToScrapedWebsiteData(
   // --- Socials ---
   const socials = mapSocialLinks(scraped?.socialLinks)
 
-  // --- Headlines & descriptions from scraped meta ---
+  // --- Headlines & descriptions from scraped meta (with fallbacks) ---
   const headlines: string[] = []
-  if (scraped?.pageTitle) headlines.push(scraped.pageTitle)
+  if (scraped?.pageTitle) {
+    headlines.push(scraped.pageTitle)
+  } else {
+    headlines.push(`${businessName} — ${category}`)
+  }
+  if (!headlines.some((h) => h.includes(businessName))) {
+    headlines.push(businessName)
+  }
 
   const descriptions: string[] = []
-  if (scraped?.metaDescription) descriptions.push(scraped.metaDescription)
+  if (scraped?.metaDescription) {
+    descriptions.push(scraped.metaDescription)
+  } else {
+    descriptions.push(
+      `${businessName} es tu mejor opción en ${category}${address ? ` en ${address}` : ''}. Contactanos hoy.`
+    )
+  }
 
   // --- WhatsApp link ---
   const wp = phone.replace(/\D/g, '').replace(/^0/, '')
@@ -186,11 +199,32 @@ export function mapLeadDataToScrapedWebsiteData(
   if (mapsEmbed) customParts.push(`- Embed de Google Maps: ${mapsEmbed}`)
   customParts.push('')
 
+  customParts.push('### Extracción de contenido (IMPORTANTE)')
+  customParts.push(
+    'El texto visible y el contenido de sub-páginas de arriba contienen información valiosa del negocio.'
+  )
+  customParts.push(
+    'Extraé de ese texto: servicios, características, preguntas frecuentes, equipo, precios, y cualquier dato relevante.'
+  )
+  customParts.push(
+    'Usá esa información para crear secciones adicionales más allá de las listadas en "Sections to Generate".'
+  )
+  customParts.push(
+    'No te limites a las secciones mínimas — si encontrás datos para services, features, FAQ, team, etc., crealas.'
+  )
+  customParts.push('')
+
   customParts.push('### Guardarailes de rendering (OBLIGATORIO)')
   customParts.push('- El body DEBE tener un background claro (blanco, crema, gris claro)')
   customParts.push('- Todo texto principal debe ser oscuro sobre fondo claro')
   customParts.push('- NUNCA usar display:none, visibility:hidden, opacity:0 en contenido principal')
   customParts.push('- NUNCA usar color de texto igual o similar al color de fondo')
+  customParts.push(
+    '- NUNCA apliques backdrop-filter o blur() al body, html, main, o secciones de ancho completo. Los efectos glass/blur SOLO se pueden usar en tarjetas pequeñas (<400px).'
+  )
+  customParts.push(
+    '- Usá colores hex o rgb como fallback si usás OKLCH, ya que no todos los navegadores lo soportan completamente.'
+  )
   customParts.push('- Incluí un botón flotante de WhatsApp (fijo en esquina inferior derecha, verde #25D366)')
   customParts.push('- Las imágenes deben usar las URLs reales proporcionadas — NO inventes URLs')
   customParts.push('- Si no hay imágenes, usá gradientes o patrones CSS creativos')
@@ -202,13 +236,17 @@ export function mapLeadDataToScrapedWebsiteData(
   )
   customParts.push('')
 
-  customParts.push('### Formato de salida')
+  customParts.push('### Formato de salida (OVERRIDE — IGNORAR Section 9 del system prompt)')
   customParts.push(
-    'Generá un HTML completo y autocontenido (<!DOCTYPE html> hasta </html>).'
+    'IGNORÁ las instrucciones de formato de salida del system prompt (Section 9 FILE delimiters).'
   )
   customParts.push(
-    'Sin explicaciones, sin markdown, sin bloques de código. Empezá directamente con <!DOCTYPE html>.'
+    'Tu output debe ser ÚNICAMENTE el HTML crudo, empezando con <!DOCTYPE html> y terminando con </html>.'
   )
+  customParts.push(
+    'Sin delimitadores FILE:, sin ---, sin ---end---. Sin explicaciones, sin markdown, sin bloques de código.'
+  )
+  customParts.push('Empezá directamente con <!DOCTYPE html>.')
 
   // --- Primary color ---
   const primaryColor = inferPrimaryColor(

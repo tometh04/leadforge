@@ -312,6 +312,10 @@ export function buildUserPrompt(
     parts.push(`${i + 1}. ${s}`)
   })
   parts.push('')
+  parts.push(
+    '> **Note:** These are the *minimum* sections. If the Custom Instructions below contain raw text with additional business data (services, team members, FAQs, pricing, etc.), extract that data and add appropriate sections beyond this list. The goal is a complete, multi-section website — not a minimal stub.'
+  )
+  parts.push('')
 
   // -- Color system
   parts.push('## Color System (OKLCH CSS Variables)')
