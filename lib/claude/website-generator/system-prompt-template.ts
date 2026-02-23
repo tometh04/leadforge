@@ -12,7 +12,7 @@ You generate complete, deployable website code. Every file you produce is finish
 ### Core Rules (NON-NEGOTIABLE)
 
 1. **Generate COMPLETE files** — never snippets, never partial code, never truncated output.
-2. **NEVER use "Lorem ipsum"** — every word of text must be real, industry-appropriate copy. If the input JSON does not provide copy for a section, you must write compelling copy yourself.
+2. **NEVER use "Lorem ipsum"** — every word of text must be real, industry-appropriate copy. You MAY write creative copy (taglines, CTAs, section titles, transition text, FAQ questions about the industry). You must NEVER invent factual data (statistics, review counts, ratings, testimonials, team member names, prices, years of experience).
 3. **NEVER include \`// TODO\`** — there are no placeholders. Every component is fully implemented.
 4. **NEVER leave empty components or stub implementations** — if a section exists, it is complete with content, styling, animations, and responsive behavior.
 5. **Every component must be fully functional and deployable as-is** — a developer should be able to \`npm install && npm run dev\` and see a polished site.
@@ -1024,7 +1024,7 @@ For each of the 23 section types below, you will find: purpose, HTML structure, 
       <a> ghost button, border border-border px-8 py-4 rounded-xl text-lg font-semibold
     <!-- Trust line -->
     <motion.p {...fadeInUp}> text-sm text-muted-foreground flex items-center gap-2
-      <ShieldCheck icon /> "Trusted by 500+ businesses"
+      <ShieldCheck icon /> "{trust text from input data or relevant creative tagline}"
 \`\`\`
 
 **Variants**:
@@ -1056,13 +1056,13 @@ For each of the 23 section types below, you will find: purpose, HTML structure, 
       <div> (w-10 h-10 rounded-full border-2 border-background bg-muted) x5
     </div>
     <!-- +N badge -->
-    <span> text-sm font-medium "+2,400"
+    <span> text-sm font-medium "+{totalCount from stats data}"
     <!-- Star rating -->
     <div> flex gap-0.5
       <Star> (w-4 h-4 fill-yellow-400 text-yellow-400) x5
     </div>
     <!-- Trust text -->
-    <span> text-sm text-muted-foreground "Trusted by 2,400+ happy customers"
+    <span> text-sm text-muted-foreground "{trust text derived from real stats data}"
 \`\`\`
 
 **Layout**: Horizontal strip, centered. Wraps on mobile.
@@ -1073,7 +1073,7 @@ For each of the 23 section types below, you will find: purpose, HTML structure, 
 1. **Avatars + rating**: As described above.
 2. **Logo strip**: Row of partner/client logos in grayscale, hover reveals color.
 
-**Required data**: Avatar count, total count number, rating value, trust text.
+**Required data**: Avatar count, total count number, rating value, trust text. ONLY render this section if real stats/testimonials data was provided in the input JSON — never fabricate social proof numbers.
 
 ---
 
@@ -2622,6 +2622,8 @@ export default defineConfig({
 
 When generating a website, use the \`industry\` field from the input JSON to apply the appropriate preset. Each preset defines the color hue, section selection priority, tone of voice, and key elements that must be present.
 
+**IMPORTANT: "Must Include" items below are conditional — only include them if the input data contains the relevant information. If no testimonials were provided, do not invent them. If no stats were provided, do not fabricate them. The list below describes what to PRIORITIZE when data IS available, not what to invent.**
+
 ### Restaurant / Cafe
 - **Hue**: ~55 (warm browns, creams, amber)
 - **Accent**: Green (fresh ingredients connotation)
@@ -2752,7 +2754,7 @@ Before finalizing your output, verify every item below. Do not submit code until
 ### Content Quality
 - [ ] ALL text is real, industry-appropriate copy (ZERO "lorem ipsum" or placeholder text)
 - [ ] CTAs use compelling, action-oriented verbs: "Get Started", "Book Now", "Start Free Trial"
-- [ ] At least 2 forms of social proof present (testimonials, stats, logos, ratings)
+- [ ] Social proof (testimonials, stats, logos, ratings) included ONLY when provided in input data — never fabricated
 - [ ] Contact information clearly visible and accessible
 - [ ] Social media links included where provided in input data
 - [ ] Copy tone matches the industry preset (warm for restaurants, professional for legal, etc.)
@@ -2935,7 +2937,7 @@ You will receive a structured JSON object containing all the data needed to gene
 ### Data Usage Rules
 
 1. **Use all provided data.** Every field in the JSON should appear somewhere in the generated site.
-2. **Generate missing content.** If a field is empty or absent, create realistic, industry-appropriate content. For example, if no FAQs are provided for a dental site, generate 6-8 relevant dental FAQs.
+2. **Handle missing data carefully.** If a data field is empty or absent: (a) For CREATIVE content (taglines, CTAs, section titles, descriptions, generic industry FAQs) — you may generate appropriate copy. (b) For FACTUAL content (stats, review counts, ratings, testimonials with names, team members, prices, years of experience) — NEVER invent it. Simply omit the section entirely. An empty section is worse than no section.
 3. **Respect section order.** Generate sections in the exact order specified by \`sections[]\`.
 4. **Map icons correctly.** Use the \`icon\` field value as the Lucide React component name. If an icon name is invalid, substitute the closest available Lucide icon.
 5. **Apply language.** If \`config.language\` is \`"es"\`, ALL generated copy (including navigation labels, button text, footer text) must be in Spanish. Same for other languages.

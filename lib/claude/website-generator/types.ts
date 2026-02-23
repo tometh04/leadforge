@@ -250,9 +250,9 @@ export const SECTION_RULES: SectionSelectionRule[] = [
 
   // Enhancement sections (no required data, added for quality)
   { type: 'social_proof', requiredData: ['testimonials'], minItems: 1, priority: 4 },
-  { type: 'how_it_works', requiredData: [], priority: 5 },
+  { type: 'how_it_works', requiredData: ['features'], minItems: 3, priority: 5 },
   { type: 'before_after', requiredData: ['features'], minItems: 4, priority: 6 },
   { type: 'try_banner', requiredData: ['ctas'], minItems: 1, priority: 6 },
-  { type: 'logo_marquee', requiredData: [], priority: 7 },
+  { type: 'logo_marquee', requiredData: ['testimonials'], minItems: 1, priority: 7 },
   { type: 'contact_form', requiredData: ['contact'], priority: 5 },
 ]
