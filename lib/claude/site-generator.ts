@@ -239,7 +239,7 @@ async function generateWithAnthropic(prompt: { systemPrompt: string; userPrompt:
 
 async function generateWithOpenAICompatible(prompt: { systemPrompt: string; userPrompt: string }): Promise<string> {
   const { model, requestUrl, headers, useResponsesApi } = buildOpenAICompatibleConfig()
-  const maxTokens = parseMaxTokens(12_000)
+  const maxTokens = parseMaxTokens(32_000)
 
   return withAnthropicRateLimitRetry('generateSiteHTML', async () => {
     const body = useResponsesApi
