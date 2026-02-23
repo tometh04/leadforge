@@ -313,7 +313,7 @@ export function buildUserPrompt(
   })
   parts.push('')
   parts.push(
-    '> **Note:** These are the *minimum* sections. If the Custom Instructions below contain raw text with additional business data (services, team members, FAQs, pricing, etc.), extract that data and add appropriate sections beyond this list. The goal is a complete, multi-section website — not a minimal stub.'
+    '> **Note:** Generate ONLY these sections unless the Custom Instructions below contain concrete, extractable business data (specific service names, team member names, real prices, etc.) — in that case you may add sections for that data. Do NOT add sections with invented or placeholder content.'
   )
   parts.push('')
 

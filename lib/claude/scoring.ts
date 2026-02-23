@@ -267,7 +267,7 @@ IMPORTANTE: Máximo 4 problems (frases cortas de ~10 palabras). Summary máximo 
   }
 }
 
-// Filtro rápido para descartar franquicias en el scraper
+// Filtro rápido para descartar franquicias en el scraper (Claude API — legacy)
 export async function quickLeadFilter(
   businessName: string,
   website: string,
@@ -303,4 +303,64 @@ Viable (true) si es negocio local independiente.`
   } catch {
     return { viable: true, reason: 'No evaluado' }
   }
+}
+
+// --- Local franchise filter (no API calls) ---
+
+const KNOWN_FRANCHISES = new Set([
+  // Fast food
+  'mcdonalds', 'burger king', 'wendys', 'subway', 'mostaza', 'kfc',
+  'pizza hut', 'dominos', 'papa johns',
+  // Coffee
+  'starbucks', 'havanna', 'bonafide', 'cafe martinez', 'the coffee store',
+  'mccafe',
+  // Ice cream
+  'freddo', 'grido', 'persicco', 'chungo', 'munchi',
+  // Pharmacies
+  'farmacity', 'farmalife', 'farmacenter',
+  // Banks
+  'santander', 'bbva', 'galicia', 'hsbc', 'macro', 'nacion',
+  'provincia', 'ciudad', 'icbc', 'supervielle', 'comafi', 'patagonia',
+  'itau', 'credicoop', 'hipotecario',
+  // Supermarkets
+  'carrefour', 'coto', 'jumbo', 'disco', 'vea', 'dia', 'changomas',
+  'walmart', 'la anonima',
+  // Gas stations
+  'ypf', 'shell', 'axion', 'puma energy',
+  // Payments
+  'rapipago', 'pago facil',
+  // Telcos
+  'movistar', 'claro', 'personal', 'tuenti',
+  // Retail chains
+  'musimundo', 'fravega', 'garbarino', 'easy', 'sodimac',
+  'open 25', 'open25',
+  // Other chains
+  'cinemark', 'hoyts', 'megatlon', 'sportclub',
+  'mc donalds', 'mc donald',
+])
+
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // strip accents
+    .replace(/[''`]/g, '')           // strip apostrophes
+    .replace(/\b(s\.?a\.?|s\.?r\.?l\.?|s\.?a\.?s\.?|inc\.?|ltda\.?|cia\.?)\b/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+export function quickLeadFilterLocal(
+  businessName: string
+): { viable: boolean; reason: string } {
+  const normalized = normalizeName(businessName)
+
+  for (const franchise of KNOWN_FRANCHISES) {
+    if (normalized.includes(franchise) || franchise.includes(normalized)) {
+      return { viable: false, reason: `Franquicia/cadena detectada: ${franchise}` }
+    }
+  }
+
+  return { viable: true, reason: '' }
 }

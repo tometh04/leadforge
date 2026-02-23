@@ -101,7 +101,7 @@ export function mapLeadDataToScrapedWebsiteData(
 
   // --- Stats from Google data ---
   const stats: Stat[] = []
-  if (googleRating) {
+  if (googleRating && googleRating > 0) {
     stats.push({
       value: googleRating.toFixed(1),
       label: 'Calificación en Google',
@@ -109,7 +109,7 @@ export function mapLeadDataToScrapedWebsiteData(
       suffix: '★',
     })
   }
-  if (googleReviewCount) {
+  if (googleReviewCount && googleReviewCount > 0) {
     stats.push({
       value: String(googleReviewCount),
       label: 'Reseñas de clientes',
@@ -207,10 +207,10 @@ export function mapLeadDataToScrapedWebsiteData(
     'Extraé de ese texto: servicios, características, preguntas frecuentes, equipo, precios, y cualquier dato relevante.'
   )
   customParts.push(
-    'Usá esa información para crear secciones adicionales más allá de las listadas en "Sections to Generate".'
+    'Si encontrás datos concretos en el texto (servicios con nombres, precios, nombres de equipo, etc.), podés crear secciones adicionales para esos datos.'
   )
   customParts.push(
-    'No te limites a las secciones mínimas — si encontrás datos para services, features, FAQ, team, etc., crealas.'
+    'NUNCA crees una sección si no tenés datos reales para llenarla — es preferible un sitio con pocas secciones bien hechas que uno con secciones vacías o con datos inventados.'
   )
   customParts.push('')
 
@@ -230,6 +230,12 @@ export function mapLeadDataToScrapedWebsiteData(
   customParts.push('- Si no hay imágenes, usá gradientes o patrones CSS creativos')
   customParts.push(
     '- SOLO incluí secciones para las que haya datos reales; NUNCA inventes datos fácticos'
+  )
+  customParts.push(
+    '- NUNCA incluyas una sección con valores "0", "N/A", o placeholders. Si un dato no existe, omití la sección entera.'
+  )
+  customParts.push(
+    '- Las estadísticas (stats) SOLO deben mostrarse si tienen valores reales > 0.'
   )
   customParts.push(
     '- Lo que SÍ podés crear: tagline, textos de CTA, títulos de sección, FAQ genéricas del rubro, copy de transición'

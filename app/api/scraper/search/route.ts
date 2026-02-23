@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { searchPlaces } from '@/lib/google-places/client'
 import { createClient } from '@/lib/supabase/server'
-import { quickLeadFilter } from '@/lib/claude/scoring'
+import { quickLeadFilterLocal } from '@/lib/claude/scoring'
 
 export async function POST(req: NextRequest) {
   try {
@@ -37,31 +37,11 @@ export async function POST(req: NextRequest) {
     }))
 
     if (filterFranchises) {
-      // Solo filtrar los nuevos (los ya importados se muestran como están)
-      const newLeads = resultsWithFlags.filter((r) => !r.already_imported)
-
-      // Evaluar en paralelo (máx 5 simultáneos para no sobrecargar la API)
-      const batchSize = 5
-      for (let i = 0; i < newLeads.length; i += batchSize) {
-        const batch = newLeads.slice(i, i + batchSize)
-        const evaluations = await Promise.allSettled(
-          batch.map((lead) =>
-            quickLeadFilter(lead.business_name, lead.website, lead.category)
-          )
-        )
-        evaluations.forEach((result, idx) => {
-          const lead = batch[idx]
-          if (result.status === 'fulfilled') {
-            lead.viable = result.value.viable
-            lead.discard_reason = result.value.viable ? null : result.value.reason
-          }
-        })
-      }
-
-      // Aplicar resultados de vuelta al array principal
+      // Filtro local instantáneo — sin llamadas a API
       resultsWithFlags = resultsWithFlags.map((r) => {
-        const evaluated = newLeads.find((n) => n.place_id === r.place_id)
-        return evaluated ?? r
+        if (r.already_imported) return r
+        const { viable, reason } = quickLeadFilterLocal(r.business_name)
+        return { ...r, viable, discard_reason: viable ? null : reason }
       })
     }
 
