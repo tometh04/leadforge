@@ -12,7 +12,9 @@
       "Bash(npx tsc:*)",
       "Bash(ls:*)",
       "Bash(railway service --help:*)",
-      "Bash(railway up --help:*)"
+      "Bash(railway up --help:*)",
+      "WebSearch",
+      "Bash(npx next build)"
     ]
   }
 }

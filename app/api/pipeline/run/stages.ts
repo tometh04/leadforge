@@ -702,6 +702,7 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
             metaDescription: (existingDetails.meta_description as string) ?? '',
             subPagesText: (existingDetails.sub_pages_text as string) ?? '',
             subPagesCount: (existingDetails.sub_pages_count as number) ?? 0,
+            detectedColors: (existingDetails.detected_colors as string[]) ?? [],
           }
         : lead.google_photo_url
           ? { googlePhotoUrl: lead.google_photo_url }
@@ -1304,6 +1305,7 @@ async function processOneLead(
             metaDescription: (existingDetails.meta_description as string) ?? '',
             subPagesText: (existingDetails.sub_pages_text as string) ?? '',
             subPagesCount: (existingDetails.sub_pages_count as number) ?? 0,
+            detectedColors: (existingDetails.detected_colors as string[]) ?? [],
           }
         : lead.google_photo_url
           ? { googlePhotoUrl: lead.google_photo_url }

@@ -44,7 +44,15 @@ Supabase PostgreSQL with three tables: `leads`, `messages`, `lead_activity`. Sch
 
 Anthropic Claude SDK (`@anthropic-ai/sdk`) used for: website quality scoring (1-10 with 8-dimension breakdown), franchise/chain filtering, and personalized outreach messages (WhatsApp/email).
 
-Site generation (`lib/claude/site-generator.ts`) is provider-configurable and defaults to OpenAI-compatible GPT-5 Codex:
+Site generation (`lib/claude/site-generator.ts`) uses the **website-generator prompt builder** (`lib/claude/website-generator/`), a sophisticated prompt engineering system with:
+- A ~3000-line system prompt template with comprehensive design rules, animation library, and section catalog
+- OKLCH color system (hex → perceptual color space with light/dark variants)
+- Intelligent section selection based on data availability (21 section types)
+- Industry-specific design context (15 industries)
+- Data mapper (`map-lead-data.ts`) that converts LeadForge's raw scraper output into structured `ScrapedWebsiteData`, passing raw text via `customInstructions` for model extraction
+- System/user prompt separation for proper API usage (Anthropic `system:` param, OpenAI `messages[0].role='system'`, Responses API `instructions:`)
+
+Site generation is provider-configurable and defaults to OpenAI-compatible GPT-5 Codex:
 
 - `SITE_GENERATOR_PROVIDER=openai-compatible` (default)
 - `SITE_GENERATOR_MODEL=gpt-5-codex` (default)
