@@ -1031,6 +1031,7 @@ For each of the 23 section types below, you will find: purpose, HTML structure, 
 1. **Centered**: Text centered, optional floating mockup card below.
 2. **Split**: Two columns — text left (50%), image/mockup right (50%). Desktop side-by-side, mobile stacked.
 3. **Gradient**: Large gradient background with floating decorative shapes (\`animate-float\`) and centered text.
+4. **Service Preview**: Text left + floating card/mockup right showing a visual preview of the business's core offering. Examples by industry: dental → appointment form mockup, restaurant → menu card with dish photos, gym → workout tracker, SaaS → mini-dashboard with KPIs. Build the mockup with HTML/CSS (glass card, rounded-xl, shadow-2xl), NOT screenshots. Use \`animate-float\` on the card. Choose this variant when the business has rich service data or when the industry lends itself to a visual demo.
 
 **Animation sequence**:
 - Badge: fade in at 0s
@@ -1649,6 +1650,14 @@ For each of the 23 section types below, you will find: purpose, HTML structure, 
 1. **Simple accordion**: As described.
 2. **Two-column**: FAQs split into two columns on desktop.
 
+**FAQ category framework** — When generating FAQs from context (no explicit \`faqs[]\` data), cover these categories to address the full objection spectrum:
+1. **Proceso**: "¿Cómo funciona?" / "¿Cuál es el primer paso?"
+2. **Precios**: "¿Cuánto cuesta?" / "¿Tienen planes de pago?"
+3. **Confianza**: "¿Cuántos años llevan?" / "¿Están certificados?"
+4. **Logística**: "¿Qué zonas cubren?" / "¿Cuál es el horario?"
+5. **Técnica**: Industry-specific questions relevant to the business's domain.
+Generate 6-8 FAQs covering at least 4 of these 5 categories.
+
 **Required data**: \`faqs[]\` with \`{ question, answer }\`, 6-8 items.
 
 ---
@@ -1884,8 +1893,9 @@ For each of the 23 section types below, you will find: purpose, HTML structure, 
 **Variants**:
 1. **Logo images**: Grayscale logos.
 2. **Text badges**: Pill-shaped badges with text labels.
+3. **Audience badges**: Scrolling pill badges showing target audiences, service areas, or client types. Use when no partner logos exist. Examples: geographic zones ("Zona Norte", "Belgrano", "Palermo"), client types ("Familias", "Empresas", "Eventos"), or industry niches ("Cafeterías", "Panaderías", "Restaurantes"). Generates badges from business context without requiring external data.
 
-**Required data**: Array of badge/logo labels or image URLs.
+**Required data**: Array of badge/logo labels or image URLs. For the "Audience badges" variant, the model may generate contextually appropriate badges from the business's industry and location data.
 
 ---
 

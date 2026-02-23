@@ -246,6 +246,7 @@ export const SECTION_RULES: SectionSelectionRule[] = [
   { type: 'stats_counter', requiredData: ['stats'], minItems: 3, priority: 4 },
   { type: 'team', requiredData: ['team'], minItems: 2, priority: 5 },
   { type: 'services', requiredData: ['services'], minItems: 2, priority: 4 },
+  { type: 'tools_showcase', requiredData: ['services'], minItems: 3, priority: 5 },
   { type: 'gallery', requiredData: ['gallery'], minItems: 3, priority: 5 },
 
   // Enhancement sections (no required data, added for quality)

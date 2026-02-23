@@ -210,6 +210,9 @@ export function mapLeadDataToScrapedWebsiteData(
     'Si encontrás datos concretos en el texto (servicios con nombres, precios, nombres de equipo, etc.), podés crear secciones adicionales para esos datos.'
   )
   customParts.push(
+    'Si el negocio tiene 3+ servicios distintos, considerá crear un tools_showcase (showcase con tabs) donde cada tab muestra un servicio con su mockup visual — esto es más impactante que un simple grid de servicios.'
+  )
+  customParts.push(
     'NUNCA crees una sección si no tenés datos reales para llenarla — es preferible un sitio con pocas secciones bien hechas que uno con secciones vacías o con datos inventados.'
   )
   customParts.push('')
