@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { searchPlaces } from '@/lib/google-places/client'
 import { createClient } from '@/lib/supabase/server'
 import { quickLeadFilterLocal } from '@/lib/claude/scoring'
+import { getSessionUser } from '@/lib/auth/verify-session'
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await getSessionUser()
+    if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
     const { niche, city, maxResults = 20, filterFranchises = true } = await req.json()
 
     if (!niche || !city) {
@@ -25,6 +29,7 @@ export async function POST(req: NextRequest) {
     const { data: existingLeads } = await supabase
       .from('leads')
       .select('place_id')
+      .eq('user_id', user.id)
       .in('place_id', placeIds)
     const existingIds = new Set(existingLeads?.map((l) => l.place_id) ?? [])
 
@@ -61,6 +66,7 @@ export async function POST(req: NextRequest) {
       new_found: newCount,
       viable: viable.length,
       discarded: discarded.length,
+      user_id: user.id,
     })
 
     return NextResponse.json({

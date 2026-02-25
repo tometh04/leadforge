@@ -5,11 +5,15 @@ import { createClient } from '@/lib/supabase/server'
 import { generateSiteHTML, slugify, ScrapedBusinessData } from '@/lib/claude/site-generator'
 import { fetchPlaceDetails } from '@/lib/google-places/client'
 import { scrapeSite } from '@/lib/scraper/site-scraper'
+import { getSessionUser } from '@/lib/auth/verify-session'
 
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ leadId: string }> }
 ) {
+  const user = await getSessionUser()
+  if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
   const { leadId } = await params
 
   try {
@@ -20,6 +24,7 @@ export async function POST(
       .from('leads')
       .select('id, business_name, category, niche, address, phone, website, place_id, rating, google_photo_url, score_details')
       .eq('id', leadId)
+      .eq('user_id', user.id)
       .single()
 
     if (fetchError || !lead) {

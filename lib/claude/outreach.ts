@@ -18,7 +18,7 @@ export async function generateWhatsAppMessage(
 El mensaje debe:
 - Estar en español informal con voseo argentino
 - No superar 3 párrafos cortos
-- Mencionar que viste su web y te tomaste el atrevimiento de revisar cómo está
+- Mencionar que visite tu web y te tomaste el atrevimiento de revisar cómo está
 - ${siteText}
 - Terminar con una pregunta abierta para iniciar la conversación
 - Tono: amigable, directo, sin sonar a spam

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { findUserByEmail, verifyPassword, ensureSeedUser } from '@/lib/auth/users'
 
 // Genera token HMAC-SHA256: "payload.signature"
-// payload = base64url("email:timestamp") — usando btoa (Web API, sin Buffer)
-async function generateToken(email: string, secret: string): Promise<string> {
-  const payload = btoa(`${email}:${Date.now()}`)
+// payload = base64("userId:email:timestamp")
+async function generateToken(userId: string, email: string, secret: string): Promise<string> {
+  const payload = btoa(`${userId}:${email}:${Date.now()}`)
 
   const keyData = new TextEncoder().encode(secret)
   const cryptoKey = await crypto.subtle.importKey(
@@ -20,7 +21,6 @@ async function generateToken(email: string, secret: string): Promise<string> {
     new TextEncoder().encode(payload)
   )
 
-  // Convertir signature a hex string
   const signatureHex = Array.from(new Uint8Array(signatureBuffer))
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
@@ -31,39 +31,52 @@ async function generateToken(email: string, secret: string): Promise<string> {
 export async function POST(req: NextRequest) {
   try {
     const { email, password } = await req.json()
-
-    const adminEmail = process.env.ADMIN_EMAIL
-    const adminPassword = process.env.ADMIN_PASSWORD
     const secret = process.env.SESSION_SECRET
 
-    if (!adminEmail || !adminPassword || !secret) {
+    if (!secret) {
       return NextResponse.json(
         { error: 'Configuración de autenticación incompleta' },
         { status: 500 }
       )
     }
 
-    // Validar credenciales (case-insensitive para el email)
-    if (
-      email?.toLowerCase() !== adminEmail.toLowerCase() ||
-      password !== adminPassword
-    ) {
+    if (!email || !password) {
+      return NextResponse.json(
+        { error: 'Email y contraseña son requeridos' },
+        { status: 400 }
+      )
+    }
+
+    // Auto-provision seed user if needed
+    await ensureSeedUser()
+
+    // Find user in DB
+    const user = await findUserByEmail(email)
+    if (!user) {
       return NextResponse.json(
         { error: 'Credenciales incorrectas' },
         { status: 401 }
       )
     }
 
-    // Generar token firmado
-    const token = await generateToken(email, secret)
+    // Verify password with bcrypt
+    const valid = await verifyPassword(password, user.password_hash)
+    if (!valid) {
+      return NextResponse.json(
+        { error: 'Credenciales incorrectas' },
+        { status: 401 }
+      )
+    }
 
-    // Crear respuesta con cookie httpOnly
+    // Generate signed token with userId
+    const token = await generateToken(user.id, user.email, secret)
+
     const response = NextResponse.json({ ok: true })
     response.cookies.set('leadforge_session', token, {
       httpOnly: true,
       sameSite: 'lax',
       secure: process.env.NODE_ENV === 'production',
-      maxAge: 60 * 60 * 24 * 7, // 7 días en segundos
+      maxAge: 60 * 60 * 24 * 7,
       path: '/',
     })
 

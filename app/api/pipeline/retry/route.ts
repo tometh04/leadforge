@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { processStage } from '../run/stages'
+import { getSessionUser } from '@/lib/auth/verify-session'
 
 export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await getSessionUser()
+    if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
     const { runId } = await req.json()
     if (!runId) {
       return NextResponse.json({ error: 'runId is required' }, { status: 400 })
@@ -13,11 +17,12 @@ export async function POST(req: NextRequest) {
 
     const supabase = createServiceClient()
 
-    // 1. Fetch the run — only allow retry on failed/cancelled
+    // 1. Fetch the run — only allow retry on failed/cancelled, scoped to user
     const { data: run, error: runError } = await supabase
       .from('pipeline_runs')
       .select('*')
       .eq('id', runId)
+      .eq('user_id', user.id)
       .single()
 
     if (runError || !run) {

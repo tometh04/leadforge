@@ -4,11 +4,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { analyzeWebsite } from '@/lib/claude/scoring'
 import { scrapeSite } from '@/lib/scraper/site-scraper'
+import { getSessionUser } from '@/lib/auth/verify-session'
 
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ leadId: string }> }
 ) {
+  const user = await getSessionUser()
+  if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
   const { leadId } = await params
 
   try {
@@ -18,6 +22,7 @@ export async function POST(
       .from('leads')
       .select('id, website, business_name, status, score_details')
       .eq('id', leadId)
+      .eq('user_id', user.id)
       .single()
 
     if (fetchError || !lead) {

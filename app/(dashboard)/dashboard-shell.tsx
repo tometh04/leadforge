@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { LayoutDashboard, Search, Kanban, Zap, LogOut, Rocket, MessageCircle } from 'lucide-react'
+import { LayoutDashboard, Search, Kanban, Zap, LogOut, Rocket, MessageCircle, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -11,9 +11,15 @@ const navItems = [
   { href: '/kanban', label: 'Pipeline', icon: Kanban },
   { href: '/autopilot', label: 'Autopilot', icon: Rocket },
   { href: '/whatsapp', label: 'WhatsApp', icon: MessageCircle },
+  { href: '/usuarios', label: 'Usuarios', icon: Users },
 ]
 
-export default function DashboardShell({ children }: { children: React.ReactNode }) {
+interface DashboardShellProps {
+  children: React.ReactNode
+  user?: { id: string; email: string }
+}
+
+export default function DashboardShell({ children, user }: DashboardShellProps) {
   const pathname = usePathname()
   const router = useRouter()
 
@@ -59,6 +65,11 @@ export default function DashboardShell({ children }: { children: React.ReactNode
 
         {/* Footer con logout */}
         <div className="border-t p-3 space-y-1">
+          {user && (
+            <p className="px-3 mb-1 text-xs text-muted-foreground truncate" title={user.email}>
+              {user.email}
+            </p>
+          )}
           <button
             onClick={handleLogout}
             className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-all"
@@ -66,7 +77,7 @@ export default function DashboardShell({ children }: { children: React.ReactNode
             <LogOut className="h-4 w-4 shrink-0" />
             Cerrar sesión
           </button>
-          <p className="px-3 text-[11px] text-muted-foreground/60 font-medium tracking-wide uppercase">v0.1 beta</p>
+          <p className="px-3 text-[11px] text-muted-foreground/60 font-medium tracking-wide uppercase">v0.2</p>
         </div>
       </aside>
 

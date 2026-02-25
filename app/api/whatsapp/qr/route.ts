@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
@@ -9,6 +9,7 @@ import { Boom } from '@hapi/boom'
 import { useSupabaseAuthState } from '@/lib/whatsapp/auth-state'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { getSessionUser } from '@/lib/auth/verify-session'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,7 +45,14 @@ async function getMessageForRetry(
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const user = await getSessionUser()
+  if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
+  const accountIdParam = req.nextUrl.searchParams.get('accountId')
+  if (!accountIdParam) return NextResponse.json({ error: 'accountId es requerido' }, { status: 400 })
+  const accountId: string = accountIdParam
+
   const encoder = new TextEncoder()
   let socketRef: ReturnType<typeof makeWASocket> | null = null
 
@@ -64,15 +72,15 @@ export async function GET() {
       }
 
       try {
-        // Clear stale credentials so Baileys generates a fresh QR
+        // Clear stale credentials for this account so Baileys generates a fresh QR
         const supabase = await createClient()
-        await supabase.from('whatsapp_auth').delete().neq('id', '')
+        await supabase.from('whatsapp_auth').delete().eq('account_id', accountId)
 
         const { version } = await fetchLatestBaileysVersion()
 
         async function connectSocket() {
           // Re-read auth state each time (picks up creds saved after QR scan)
-          const { state, saveCreds } = await useSupabaseAuthState()
+          const { state, saveCreds } = await useSupabaseAuthState(accountId)
 
           const sock = makeWASocket({
             version,
@@ -93,6 +101,20 @@ export async function GET() {
             }
 
             if (connection === 'open') {
+              // Extract phone number from Baileys creds and update account
+              try {
+                const serviceSupabase = createServiceClient()
+                const me = sock.user
+                const phone = me?.id?.split(':')[0] ?? me?.id?.split('@')[0] ?? null
+                if (phone) {
+                  await serviceSupabase
+                    .from('whatsapp_accounts')
+                    .update({ phone_number: phone, status: 'paired' })
+                    .eq('id', accountId)
+                }
+              } catch {
+                // Non-fatal — phone extraction failed
+              }
               send('connected', { success: true })
               // Let Baileys finish initial sync (pre-keys, history) before closing
               setTimeout(() => {

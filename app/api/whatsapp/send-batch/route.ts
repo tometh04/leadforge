@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createWhatsAppSocket, waitForConnection, formatPhoneToJid } from '@/lib/whatsapp/client'
+import { getSessionUser } from '@/lib/auth/verify-session'
 
 export const maxDuration = 300 // 5 min max para Vercel Pro
 
@@ -11,10 +12,13 @@ interface BatchLead {
 }
 
 export async function POST(req: NextRequest) {
+  const user = await getSessionUser()
+  if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
   const encoder = new TextEncoder()
   let socketRef: Awaited<ReturnType<typeof createWhatsAppSocket>>['sock'] | null = null
 
-  const { leads }: { leads: BatchLead[] } = await req.json()
+  const { leads, accountId }: { leads: BatchLead[]; accountId?: string } = await req.json()
 
   if (!leads || leads.length === 0) {
     return NextResponse.json({ error: 'No hay leads para enviar' }, { status: 400 })
@@ -29,7 +33,7 @@ export async function POST(req: NextRequest) {
       }
 
       try {
-        const { sock } = await createWhatsAppSocket()
+        const { sock } = await createWhatsAppSocket(accountId)
         socketRef = sock
 
         await waitForConnection(sock, 15000)

@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { ScraperResult } from '@/types'
+import { getSessionUser } from '@/lib/auth/verify-session'
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await getSessionUser()
+    if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
     const { leads, niche, city }: { leads: ScraperResult[]; niche: string; city: string } =
       await req.json()
 
@@ -25,12 +29,13 @@ export async function POST(req: NextRequest) {
       niche,
       city,
       status: 'nuevo',
+      user_id: user.id,
     }))
 
-    // Upsert: si ya existe el place_id, no lo duplica
+    // Upsert: si ya existe el (place_id, user_id), no lo duplica
     const { data, error } = await supabase
       .from('leads')
-      .upsert(toInsert, { onConflict: 'place_id', ignoreDuplicates: true })
+      .upsert(toInsert, { onConflict: 'place_id,user_id', ignoreDuplicates: true })
       .select('id, business_name')
 
     if (error) {

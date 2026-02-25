@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getSessionUser } from '@/lib/auth/verify-session'
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ leadId: string }> }
 ) {
+  const user = await getSessionUser()
+  if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
   const { leadId } = await params
 
   try {
@@ -17,6 +21,7 @@ export async function POST(
       channel: 'whatsapp',
       message_body,
       template_used: template_used ?? 'manual',
+      user_id: user.id,
     })
 
     // Actualizar estado del lead

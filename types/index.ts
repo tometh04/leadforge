@@ -160,3 +160,22 @@ export interface ScraperResult {
   google_photo_url: string | null
   already_imported?: boolean
 }
+
+export interface AppUser {
+  id: string
+  email: string
+  name: string | null
+  is_seed: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface WhatsAppAccount {
+  id: string
+  user_id: string
+  label: string
+  phone_number: string | null
+  status: 'paired' | 'disconnected'
+  created_at: string
+  updated_at: string
+}

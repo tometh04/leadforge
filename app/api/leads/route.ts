@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getSessionUser } from '@/lib/auth/verify-session'
 
 export async function GET(req: NextRequest) {
   try {
+    const user = await getSessionUser()
+    if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
     const { searchParams } = new URL(req.url)
     const status = searchParams.get('status')
     const niche = searchParams.get('niche')
@@ -15,7 +19,7 @@ export async function GET(req: NextRequest) {
     const offset = (page - 1) * limit
 
     const supabase = await createClient()
-    let query = supabase.from('leads').select('*', { count: 'exact' })
+    let query = supabase.from('leads').select('*', { count: 'exact' }).eq('user_id', user.id)
 
     if (status && status !== 'all') query = query.eq('status', status)
     if (niche) query = query.eq('niche', niche)

@@ -17,6 +17,7 @@ import {
   ChevronDown,
   Clock,
   RefreshCw,
+  Phone,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -42,8 +43,13 @@ import {
 } from '@/components/ui/table'
 import { usePipeline } from '@/hooks/use-pipeline'
 import { LeadCardModal } from '@/components/leads/LeadCardModal'
-import type { Lead, LeadActivity } from '@/types'
+import type { Lead, LeadActivity, WhatsAppAccount } from '@/types'
 import type { PipelineStage, PipelineLeadState, PipelineRun, PipelineLeadRow } from '@/types'
+
+interface WhatsAppAccountCheck extends WhatsAppAccount {
+  checking: boolean
+  connected: boolean | null
+}
 
 const NICHES = [
   'Restaurantes',
@@ -149,7 +155,8 @@ export default function AutopilotPage() {
   const [skipSites, setSkipSites] = useState(false)
   const [skipMessages, setSkipMessages] = useState(false)
   const [skipSending, setSkipSending] = useState(false)
-  const [whatsappPaired, setWhatsappPaired] = useState<boolean | null>(null)
+  const [whatsappAccounts, setWhatsappAccounts] = useState<WhatsAppAccountCheck[]>([])
+  const [selectedAccountId, setSelectedAccountId] = useState<string>('')
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [selectedActivity, setSelectedActivity] = useState<LeadActivity[]>([])
   const [modalOpen, setModalOpen] = useState(false)
@@ -158,10 +165,39 @@ export default function AutopilotPage() {
   const [siteHealth, setSiteHealth] = useState<SiteGeneratorHealthResponse | null>(null)
 
   useEffect(() => {
-    fetch('/api/whatsapp/status')
+    // Fetch user's WhatsApp accounts
+    fetch('/api/whatsapp/accounts')
       .then((r) => r.json())
-      .then((d) => setWhatsappPaired(d.paired))
-      .catch(() => setWhatsappPaired(false))
+      .then(async (accounts: WhatsAppAccount[]) => {
+        const withCheck: WhatsAppAccountCheck[] = accounts.map((a) => ({
+          ...a,
+          checking: true,
+          connected: null,
+        }))
+        setWhatsappAccounts(withCheck)
+
+        // Check each account's connection
+        for (const account of withCheck) {
+          try {
+            const res = await fetch(`/api/whatsapp/accounts/${account.id}/check`)
+            const data = await res.json()
+            setWhatsappAccounts((prev) =>
+              prev.map((a) =>
+                a.id === account.id
+                  ? { ...a, checking: false, connected: data.connected ?? false, phone_number: data.phone ?? a.phone_number }
+                  : a
+              )
+            )
+          } catch {
+            setWhatsappAccounts((prev) =>
+              prev.map((a) =>
+                a.id === account.id ? { ...a, checking: false, connected: false } : a
+              )
+            )
+          }
+        }
+      })
+      .catch(() => setWhatsappAccounts([]))
   }, [])
 
   const handleRowClick = async (leadId: string) => {
@@ -188,6 +224,10 @@ export default function AutopilotPage() {
       toast.error('Completá el nicho y la ciudad')
       return
     }
+    if (!skipSending && !selectedAccountId) {
+      toast.error('Seleccioná un número de WhatsApp o activá "Omitir envío"')
+      return
+    }
 
     try {
       await run({
@@ -198,6 +238,7 @@ export default function AutopilotPage() {
         skipSiteGeneration: skipSites,
         skipMessages,
         skipSending,
+        whatsappAccountId: skipSending ? undefined : selectedAccountId,
       })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error en el pipeline')
@@ -261,17 +302,34 @@ export default function AutopilotPage() {
       )}
 
       {/* WhatsApp warning */}
-      {whatsappPaired === false && !skipSending && (
+      {!skipSending && whatsappAccounts.length === 0 && (
         <div className="mb-6 flex items-center gap-3 rounded-lg border border-yellow-300 bg-yellow-50 p-4 dark:border-yellow-800 dark:bg-yellow-900/20">
           <AlertTriangle className="h-5 w-5 shrink-0 text-yellow-600 dark:text-yellow-400" />
           <div className="flex-1">
             <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-              WhatsApp no está vinculado
+              No hay números de WhatsApp configurados
             </p>
             <p className="text-xs text-yellow-700 dark:text-yellow-300">
               El envío de mensajes no funcionará.{' '}
               <a href="/whatsapp" className="underline">
-                Vincular ahora
+                Agregar número
+              </a>{' '}
+              o activá &quot;Omitir envío&quot;.
+            </p>
+          </div>
+        </div>
+      )}
+      {!skipSending && whatsappAccounts.length > 0 && !whatsappAccounts.some((a) => a.connected) && !whatsappAccounts.some((a) => a.checking) && (
+        <div className="mb-6 flex items-center gap-3 rounded-lg border border-yellow-300 bg-yellow-50 p-4 dark:border-yellow-800 dark:bg-yellow-900/20">
+          <AlertTriangle className="h-5 w-5 shrink-0 text-yellow-600 dark:text-yellow-400" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+              Ningún número de WhatsApp está conectado
+            </p>
+            <p className="text-xs text-yellow-700 dark:text-yellow-300">
+              Verificá la conexión en{' '}
+              <a href="/whatsapp" className="underline">
+                WhatsApp
               </a>{' '}
               o activá &quot;Omitir envío&quot;.
             </p>
@@ -340,6 +398,51 @@ export default function AutopilotPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {!skipSending && (
+              <div className="space-y-1.5">
+                <Label>Número WhatsApp</Label>
+                <Select
+                  value={selectedAccountId}
+                  onValueChange={setSelectedAccountId}
+                  disabled={isRunning}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar número" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {whatsappAccounts.map((account) => (
+                      <SelectItem
+                        key={account.id}
+                        value={account.id}
+                        disabled={account.checking || account.connected === false}
+                      >
+                        <span className="flex items-center gap-2">
+                          <span
+                            className={`inline-block h-2 w-2 rounded-full ${
+                              account.checking
+                                ? 'bg-gray-400 animate-pulse'
+                                : account.connected
+                                  ? 'bg-green-500'
+                                  : 'bg-red-400'
+                            }`}
+                          />
+                          {account.label}
+                          {account.phone_number ? ` (+${account.phone_number.slice(0, 5)}...)` : ''}
+                          {account.checking ? ' (verificando...)' : ''}
+                          {!account.checking && account.connected === false ? ' (desconectado)' : ''}
+                        </span>
+                      </SelectItem>
+                    ))}
+                    {whatsappAccounts.length === 0 && (
+                      <SelectItem value="_none" disabled>
+                        No hay números configurados
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
 
             <div className="flex items-end">
               {isRunning ? (
@@ -715,6 +818,7 @@ export default function AutopilotPage() {
             skipSiteGeneration: !!cfg.skipSiteGeneration,
             skipMessages: !!cfg.skipMessages,
             skipSending: !!cfg.skipSending,
+            whatsappAccountId: selectedAccountId || undefined,
           }).catch((err) => {
             toast.error(err instanceof Error ? err.message : 'Error en el pipeline')
           })

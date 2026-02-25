@@ -11,6 +11,7 @@ interface PipelineConfig {
   skipSiteGeneration: boolean
   skipMessages: boolean
   skipSending: boolean
+  whatsappAccountId?: string
 }
 
 interface PipelineState {

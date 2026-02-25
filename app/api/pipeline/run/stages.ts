@@ -18,6 +18,7 @@ interface PipelineConfig {
   skipSiteGeneration: boolean
   skipMessages: boolean
   skipSending: boolean
+  whatsappAccountId?: string
 }
 
 interface PipelineRunErrorLog {
@@ -225,13 +226,19 @@ export async function processStage(runId: string, stage: string, fromPhase: 'a' 
   // Fetch config from the pipeline_runs row
   const { data: run } = await supabase
     .from('pipeline_runs')
-    .select('config, status')
+    .select('config, status, user_id, whatsapp_account_id')
     .eq('id', runId)
     .single()
 
   if (!run || run.status === 'cancelled') return
 
   const config = run.config as PipelineConfig
+  // Attach whatsapp_account_id from the run row to config for use in send stages
+  if (run.whatsapp_account_id) {
+    config.whatsappAccountId = run.whatsapp_account_id
+  }
+  // Store user_id on config for propagation to lead inserts
+  const runUserId = run.user_id as string | undefined
 
   const t0 = Date.now()
   console.log(`[pipeline/stages] ${stage} DISPATCH START run=${runId}`)
@@ -239,10 +246,10 @@ export async function processStage(runId: string, stage: string, fromPhase: 'a' 
   try {
     switch (stage) {
       case 'search':
-        await stageSearch(runId, config, fromPhase)
+        await stageSearch(runId, config, fromPhase, runUserId)
         break
       case 'import':
-        await stageImport(runId, config, fromPhase)
+        await stageImport(runId, config, fromPhase, runUserId)
         break
       case 'analyze':
         await stageAnalyze(runId, config, fromPhase)
@@ -331,7 +338,7 @@ async function advanceOrComplete(
 
 // ─── Stage: Search ──────────────────────────────────────────────────────────────
 
-async function stageSearch(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
+async function stageSearch(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init', userId?: string) {
   const { supabase, updateRun, isCancelled } = createRunHelpers(runId, 'search')
 
   await updateRun({ stage: 'searching' })
@@ -347,12 +354,11 @@ async function stageSearch(runId: string, config: PipelineConfig, fromPhase: 'a'
     return
   }
 
-  // Check duplicates
+  // Check duplicates (scoped to user)
   const placeIds = places.map((p) => p.place_id)
-  const { data: existingLeads } = await supabase
-    .from('leads')
-    .select('place_id')
-    .in('place_id', placeIds)
+  let dupQuery = supabase.from('leads').select('place_id').in('place_id', placeIds)
+  if (userId) dupQuery = dupQuery.eq('user_id', userId)
+  const { data: existingLeads } = await dupQuery
   const existingIds = new Set(existingLeads?.map((l) => l.place_id) ?? [])
 
   // Quick franchise filter
@@ -401,7 +407,7 @@ async function stageSearch(runId: string, config: PipelineConfig, fromPhase: 'a'
 
 // ─── Stage: Import ──────────────────────────────────────────────────────────────
 
-async function stageImport(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init') {
+async function stageImport(runId: string, config: PipelineConfig, fromPhase: 'a' | 'b' | 'init', userId?: string) {
   const { supabase, updateRun, isCancelled } = createRunHelpers(runId, 'import')
 
   await updateRun({ stage: 'importing' })
@@ -435,11 +441,12 @@ async function stageImport(runId: string, config: PipelineConfig, fromPhase: 'a'
     niche: config.niche,
     city: config.city,
     status: 'nuevo',
+    ...(userId ? { user_id: userId } : {}),
   }))
 
   await supabase
     .from('leads')
-    .upsert(toInsert, { onConflict: 'place_id', ignoreDuplicates: true })
+    .upsert(toInsert, { onConflict: 'place_id,user_id', ignoreDuplicates: true })
 
   // Fetch imported leads with their DB IDs
   const { data: importedLeads } = await supabase
@@ -947,7 +954,7 @@ async function stageSend(runId: string, config: PipelineConfig, fromPhase: 'a' |
     let sock: Awaited<ReturnType<typeof createWhatsAppSocket>>['sock'] | null = null
 
     try {
-      const socketResult = await createWhatsAppSocket()
+      const socketResult = await createWhatsAppSocket(config.whatsappAccountId)
       sock = socketResult.sock
       await waitForConnection(sock, 15000)
 
@@ -1044,9 +1051,11 @@ class SendQueue {
   private connectionError: unknown = null
   private connected = false
   private runHelpers: ReturnType<typeof createRunHelpers>
+  private accountId?: string
 
-  constructor(runHelpers: ReturnType<typeof createRunHelpers>) {
+  constructor(runHelpers: ReturnType<typeof createRunHelpers>, accountId?: string) {
     this.runHelpers = runHelpers
+    this.accountId = accountId
   }
 
   async enqueue(pl: Record<string, unknown>): Promise<void> {
@@ -1055,7 +1064,7 @@ class SendQueue {
     // Lazily connect on first enqueue
     if (!this.sock && !this.connected) {
       try {
-        const socketResult = await createWhatsAppSocket()
+        const socketResult = await createWhatsAppSocket(this.accountId)
         this.sock = socketResult.sock
         await waitForConnection(this.sock, 15000)
         this.connected = true
@@ -1533,7 +1542,7 @@ async function stageProcessLeads(runId: string, config: PipelineConfig): Promise
     (pl) => pl.status !== 'skipped' && pl.status !== 'sent' && pl.status !== 'error'
   )
 
-  const sendQueue = new SendQueue(helpers)
+  const sendQueue = new SendQueue(helpers, config.whatsappAccountId)
 
   try {
     await pMap(

@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { generateWhatsAppMessage, buildDefaultMessage } from '@/lib/claude/outreach'
+import { getSessionUser } from '@/lib/auth/verify-session'
 
 export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ leadId: string }> }
 ) {
+  const user = await getSessionUser()
+  if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
   const { leadId } = await params
 
   try {
@@ -15,6 +19,7 @@ export async function POST(
       .from('leads')
       .select('*')
       .eq('id', leadId)
+      .eq('user_id', user.id)
       .single()
 
     if (error || !lead) {

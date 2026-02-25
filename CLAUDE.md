@@ -21,20 +21,27 @@ LeadForge is a Next.js 16 (App Router) TypeScript application for prospecting lo
 
 ### Key Layers
 
-- **`app/`** — Next.js App Router. Route group `(dashboard)` holds all protected pages (CRM, kanban, scraper). Auth is enforced in `(dashboard)/layout.tsx` via `requireAuth()`, not middleware.
-- **`app/api/`** — RESTful API routes. Key endpoints: `/leads`, `/scraper/search`, `/analyze/[leadId]`, `/generate-site/[leadId]`, `/outreach/generate-message/[leadId]`.
-- **`lib/`** — Core logic organized by domain: `claude/` (AI scoring, outreach, site generation), `supabase/` (DB clients + schema), `scraper/` (cheerio-based HTML parsing), `google-places/` (Places API), `auth/` (HMAC-SHA256 session verification).
+- **`app/`** — Next.js App Router. Route group `(dashboard)` holds all protected pages (CRM, kanban, scraper, usuarios). Auth enforced by `middleware.ts` + `(dashboard)/layout.tsx` via `requireAuth()`.
+- **`app/api/`** — RESTful API routes. Key endpoints: `/leads`, `/scraper/search`, `/analyze/[leadId]`, `/generate-site/[leadId]`, `/outreach/generate-message/[leadId]`, `/users`, `/whatsapp/accounts`. All data routes scope queries by `user_id`.
+- **`lib/`** — Core logic organized by domain: `claude/` (AI scoring, outreach, site generation), `supabase/` (DB clients + schema), `scraper/` (cheerio-based HTML parsing), `google-places/` (Places API), `auth/` (session verification + user CRUD with bcrypt), `whatsapp/` (account-scoped Baileys auth state).
 - **`components/ui/`** — shadcn/ui components (New York style, Lucide icons). Add new ones via `npx shadcn@latest add <component>`.
 - **`components/leads/`** — Lead-specific UI (detail panel, modals, status/score badges).
-- **`types/index.ts`** — All shared TypeScript types (`Lead`, `LeadStatus`, `ScoreDetails`, `Message`, `LeadActivity`, `ScraperResult`).
+- **`components/users/`** — User management UI (table, create/edit/delete dialogs).
+- **`types/index.ts`** — All shared TypeScript types (`Lead`, `LeadStatus`, `ScoreDetails`, `Message`, `LeadActivity`, `ScraperResult`, `AppUser`, `WhatsAppAccount`).
 
 ### Auth
 
-Single-user MVP with custom HMAC-SHA256 tokens. Credentials are `ADMIN_EMAIL`/`ADMIN_PASSWORD` env vars. Session stored in `leadforge_session` httpOnly cookie (7-day expiry). No OAuth, no JWT library.
+Multi-user system with bcrypt password hashing and HMAC-SHA256 session tokens. `ADMIN_EMAIL`/`ADMIN_PASSWORD` env vars auto-provision a seed user on first login. Users table in Supabase with bcrypt (12 rounds). Session stored in `leadforge_session` httpOnly cookie (7-day expiry). Token format: `base64(userId:email:timestamp).hmacSignature`. Middleware (`middleware.ts`) validates tokens on all routes (public whitelist: `/login`, `/preview/*`, `/api/auth/*`, `/api/site-generator/health`). API routes use `getSessionUser()` for user identification; Server Components use `requireAuth()`.
+
+User management at `/usuarios` with CRUD API (`/api/users`). All data tables have `user_id` FK for data isolation — each user sees only their own leads, messages, pipeline runs, etc.
 
 ### Database
 
-Supabase PostgreSQL with three tables: `leads`, `messages`, `lead_activity`. Schema defined in `lib/supabase/schema.sql`. RLS is disabled. Uses `@supabase/ssr` for server-side client, `@supabase/supabase-js` for browser client.
+Supabase PostgreSQL with tables: `users`, `whatsapp_accounts`, `leads`, `messages`, `lead_activity`, `scraper_searches`, `whatsapp_auth`, `pipeline_runs`, `pipeline_leads`. Schema in `lib/supabase/schema.sql`, migration in `lib/supabase/migrations/001_multi_user.sql`. RLS disabled — data isolation enforced via `user_id` filtering in code. Uses `@supabase/ssr` for server-side client, `@supabase/supabase-js` for browser client.
+
+### WhatsApp Multi-Account
+
+Each user can have multiple WhatsApp accounts (`whatsapp_accounts` table). Baileys auth state is scoped by `account_id` in `whatsapp_auth` (composite PK: `account_id, id`). WhatsApp management at `/whatsapp` with account CRUD, QR pairing per account, and connection health checks. Autopilot page has a dropdown to select which WhatsApp number to use for sending.
 
 ### Lead Status Lifecycle
 

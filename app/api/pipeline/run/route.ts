@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse, after } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { processStage } from './stages'
+import { getSessionUser } from '@/lib/auth/verify-session'
 
 export const maxDuration = 300
 
 export async function POST(req: NextRequest) {
   try {
+    const user = await getSessionUser()
+    if (!user) return NextResponse.json({ error: 'No autorizado' }, { status: 401 })
+
     const config = await req.json()
 
     if (!config.niche || !config.city) {
@@ -22,6 +26,8 @@ export async function POST(req: NextRequest) {
         status: 'running',
         stage: 'searching',
         config,
+        user_id: user.id,
+        whatsapp_account_id: config.whatsappAccountId ?? null,
       })
       .select()
       .single()

@@ -44,8 +44,9 @@ async function getMessage(
   }
 }
 
-export async function createWhatsAppSocket() {
-  const { state, saveCreds } = await useSupabaseAuthState()
+export async function createWhatsAppSocket(accountId?: string) {
+  if (!accountId) throw new Error('accountId es requerido para crear un socket de WhatsApp')
+  const { state, saveCreds } = await useSupabaseAuthState(accountId)
   const { version } = await fetchLatestBaileysVersion()
 
   const sock = makeWASocket({
