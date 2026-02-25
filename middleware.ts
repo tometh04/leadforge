@@ -5,6 +5,8 @@ const PUBLIC_PATHS = [
   '/api/auth/login',
   '/api/auth/logout',
   '/api/site-generator/health',
+  '/api/pipeline/run/continue-a',
+  '/api/pipeline/run/continue-b',
 ]
 
 const PUBLIC_PREFIXES = [
