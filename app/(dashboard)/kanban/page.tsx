@@ -341,18 +341,30 @@ export default function KanbanPage() {
                                 {/* Quick info */}
                                 <div className="mt-2 space-y-0.5">
                                   {lead.phone && (
-                                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                    <a
+                                      href={`https://wa.me/${lead.phone.replace(/\D/g, '')}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+                                    >
                                       <Phone className="h-2.5 w-2.5 shrink-0" />
                                       <span className="truncate">{lead.phone}</span>
-                                    </div>
+                                    </a>
                                   )}
                                   {lead.website && (
-                                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                    <a
+                                      href={lead.website}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+                                    >
                                       <ExternalLink className="h-2.5 w-2.5 shrink-0" />
                                       <span className="truncate">
                                         {(() => { try { return new URL(lead.website).hostname.replace('www.', '') } catch { return lead.website } })()}
                                       </span>
-                                    </div>
+                                    </a>
                                   )}
                                   {lead.rating && (
                                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -365,9 +377,15 @@ export default function KanbanPage() {
                                 {/* Badges */}
                                 <div className="mt-2 flex flex-wrap gap-1">
                                   {lead.generated_site_url && (
-                                    <span className="inline-flex items-center gap-0.5 rounded-full bg-purple-100 px-1.5 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                                    <a
+                                      href={lead.generated_site_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="inline-flex items-center gap-0.5 rounded-full bg-purple-100 px-1.5 py-0.5 text-xs font-medium text-purple-700 hover:bg-purple-200 transition-colors dark:bg-purple-900/30 dark:text-purple-300 dark:hover:bg-purple-900/50"
+                                    >
                                       🌐 Sitio listo
-                                    </span>
+                                    </a>
                                   )}
                                   {(analyzing === lead.id || generatingSite.has(lead.id)) && (
                                     <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700">

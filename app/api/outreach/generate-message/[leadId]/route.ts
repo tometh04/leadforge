@@ -34,12 +34,12 @@ export async function POST(
         lead.business_name,
         lead.category ?? lead.niche,
         lead.address ?? '',
-        lead.generated_site_url
+        lead.score_details
       )
       usedAI = true
     } catch {
       // Si falla la IA (sin saldo, etc.), usar template por defecto
-      message = buildDefaultMessage(lead.business_name, lead.generated_site_url)
+      message = buildDefaultMessage(lead.business_name, lead.score_details)
       usedAI = false
     }
 

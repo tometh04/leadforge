@@ -878,11 +878,11 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig, from
           lead.business_name,
           lead.category ?? lead.niche,
           lead.address ?? '',
-          lead.generated_site_url
+          lead.score_details
         )
       } catch (err) {
         if (isAnthropicRateLimitError(err)) throw err
-        message = buildDefaultMessage(lead.business_name, lead.generated_site_url)
+        message = buildDefaultMessage(lead.business_name, lead.score_details)
       }
 
       await updatePipelineLead(pl.id, { status: 'message_ready', message })
@@ -1442,11 +1442,11 @@ async function processOneLead(
           lead.business_name,
           lead.category ?? lead.niche,
           lead.address ?? '',
-          lead.generated_site_url
+          lead.score_details
         )
       } catch (err) {
         if (isAnthropicRateLimitError(err)) throw err
-        message = buildDefaultMessage(lead.business_name, lead.generated_site_url)
+        message = buildDefaultMessage(lead.business_name, lead.score_details)
       }
 
       await updatePipelineLead(pl.id as string, { status: 'message_ready', message })
