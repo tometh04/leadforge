@@ -134,6 +134,48 @@ function toErrorMessage(err: unknown, fallback = 'Error desconocido'): string {
   return fallback
 }
 
+let siteGenerationQueue: Promise<void> = Promise.resolve()
+
+async function enqueueSiteGeneration<T>(task: () => Promise<T>): Promise<T> {
+  const previous = siteGenerationQueue
+  let release: (() => void) | null = null
+  siteGenerationQueue = new Promise<void>((resolve) => {
+    release = resolve
+  })
+
+  await previous.catch(() => undefined)
+  try {
+    return await task()
+  } finally {
+    if (release) release()
+  }
+}
+
+function toRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {}
+}
+
+function getRateLimitRetryDelayMs(err: unknown): number {
+  const e = toRecord(err)
+  const retryAfterRaw = e.retryAfterMs
+  const retryAfterMs =
+    typeof retryAfterRaw === 'number' && Number.isFinite(retryAfterRaw) && retryAfterRaw >= 0
+      ? Math.round(retryAfterRaw)
+      : null
+
+  const envDelayRaw = process.env.PIPELINE_RATE_LIMIT_DELAY_MS?.trim()
+  const envDelay = envDelayRaw ? Number(envDelayRaw) : Number.NaN
+  const configuredDefault =
+    Number.isFinite(envDelay) && envDelay > 0 ? Math.round(envDelay) : 30_000
+
+  const chosen = retryAfterMs ?? configuredDefault
+  return Math.max(5_000, Math.min(chosen, 180_000))
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 async function appendPipelineRunError(
   runId: string,
   entry: Omit<PipelineRunErrorLog, 'at'>
@@ -281,7 +323,10 @@ export async function processStage(runId: string, stage: string, fromPhase: 'a' 
     const errMsg = toErrorMessage(err)
 
     if (isAIRateLimitError(err)) {
-      console.warn(`[pipeline/stages] ${stage} RATE_LIMIT run=${runId} elapsed=${Date.now() - t0}ms`)
+      const retryDelayMs = getRateLimitRetryDelayMs(err)
+      console.warn(
+        `[pipeline/stages] ${stage} RATE_LIMIT run=${runId} elapsed=${Date.now() - t0}ms retry_in=${Math.round(retryDelayMs / 1000)}s`
+      )
       await appendPipelineRunError(runId, {
         stage,
         step: 'rate_limit_pause',
@@ -294,6 +339,17 @@ export async function processStage(runId: string, stage: string, fromPhase: 'a' 
         .from('pipeline_runs')
         .update({ status: 'running', updated_at: new Date().toISOString() })
         .eq('id', runId)
+
+      await sleep(retryDelayMs)
+
+      const { data: currentRun } = await supabase
+        .from('pipeline_runs')
+        .select('status')
+        .eq('id', runId)
+        .single()
+      if (currentRun?.status === 'cancelled') return
+
+      await triggerNextStage(runId, stage, fromPhase)
       return
     }
 
@@ -760,18 +816,20 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
         }
       }
 
-      const html = await generateSiteHTML({
-        businessName: lead.business_name,
-        category: lead.category ?? lead.niche,
-        address: lead.address ?? '',
-        phone: lead.phone ?? '',
-        scraped: scrapedData,
-        googleRating,
-        googleReviewCount,
-        openingHours,
-        imageUrls: allImageUrls,
-        logoUrl: rawLogoUrl,
-      })
+      const html = await enqueueSiteGeneration(() =>
+        generateSiteHTML({
+          businessName: lead.business_name,
+          category: lead.category ?? lead.niche,
+          address: lead.address ?? '',
+          phone: lead.phone ?? '',
+          scraped: scrapedData,
+          googleRating,
+          googleReviewCount,
+          openingHours,
+          imageUrls: allImageUrls,
+          logoUrl: rawLogoUrl,
+        })
+      )
 
       const slug = `${slugify(lead.business_name)}-${lead.id.slice(0, 6)}`
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'
@@ -1391,18 +1449,20 @@ async function processOneLead(
         }
       }
 
-      const html = await generateSiteHTML({
-        businessName: lead.business_name,
-        category: lead.category ?? lead.niche,
-        address: lead.address ?? '',
-        phone: lead.phone ?? '',
-        scraped: scrapedData,
-        googleRating,
-        googleReviewCount,
-        openingHours,
-        imageUrls: allImageUrls,
-        logoUrl: rawLogoUrl,
-      })
+      const html = await enqueueSiteGeneration(() =>
+        generateSiteHTML({
+          businessName: lead.business_name,
+          category: lead.category ?? lead.niche,
+          address: lead.address ?? '',
+          phone: lead.phone ?? '',
+          scraped: scrapedData,
+          googleRating,
+          googleReviewCount,
+          openingHours,
+          imageUrls: allImageUrls,
+          logoUrl: rawLogoUrl,
+        })
+      )
 
       const slug = `${slugify(lead.business_name)}-${lead.id.slice(0, 6)}`
       const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000'

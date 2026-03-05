@@ -92,6 +92,19 @@ function parseMaxTokens(defaultValue: number): number {
   return Math.floor(parsed)
 }
 
+function parseRateLimitMaxAttempts(defaultValue: number): number {
+  const raw = process.env.SITE_GENERATOR_RATE_LIMIT_MAX_ATTEMPTS?.trim()
+  if (!raw) return defaultValue
+
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed)) return defaultValue
+
+  const normalized = Math.floor(parsed)
+  if (normalized < 1) return defaultValue
+  if (normalized > 5) return 5
+  return normalized
+}
+
 function openAICompatibleCompletionsUrl(baseUrlRaw: string): string {
   const baseUrl = baseUrlRaw.replace(/\/+$/, '')
 
@@ -218,6 +231,7 @@ async function generateWithAnthropic(prompt: { systemPrompt: string; userPrompt:
   const anthropic = getAnthropicClient()
   const model = getAnthropicSiteGeneratorModel()
   const maxTokens = parseMaxTokens(32000)
+  const maxRateLimitAttempts = parseRateLimitMaxAttempts(1)
 
   const message = await withAIRateLimitRetry('generateSiteHTML', async () => {
     const stream = anthropic.messages.stream({
@@ -227,7 +241,7 @@ async function generateWithAnthropic(prompt: { systemPrompt: string; userPrompt:
       messages: [{ role: 'user', content: prompt.userPrompt }],
     })
     return stream.finalMessage()
-  })
+  }, maxRateLimitAttempts)
 
   if (message.stop_reason === 'max_tokens') {
     console.warn(
@@ -243,6 +257,7 @@ async function generateWithAnthropic(prompt: { systemPrompt: string; userPrompt:
 async function generateWithOpenAICompatible(prompt: { systemPrompt: string; userPrompt: string }): Promise<string> {
   const { model, requestUrl, headers, useResponsesApi } = buildOpenAICompatibleConfig()
   const maxTokens = parseMaxTokens(32_000)
+  const maxRateLimitAttempts = parseRateLimitMaxAttempts(1)
 
   return withAIRateLimitRetry('generateSiteHTML', async () => {
     const body = useResponsesApi
@@ -311,7 +326,7 @@ async function generateWithOpenAICompatible(prompt: { systemPrompt: string; user
     }
 
     return extractOpenAIText(payload)
-  })
+  }, maxRateLimitAttempts)
 }
 
 async function generateSiteModelOutput(prompt: { systemPrompt: string; userPrompt: string }): Promise<string> {
