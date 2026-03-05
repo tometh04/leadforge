@@ -138,16 +138,16 @@ let siteGenerationQueue: Promise<void> = Promise.resolve()
 
 async function enqueueSiteGeneration<T>(task: () => Promise<T>): Promise<T> {
   const previous = siteGenerationQueue
-  let release: (() => void) | null = null
+  let release: () => void = () => {}
   siteGenerationQueue = new Promise<void>((resolve) => {
-    release = resolve
+    release = () => resolve()
   })
 
   await previous.catch(() => undefined)
   try {
     return await task()
   } finally {
-    if (release) release()
+    release()
   }
 }
 
