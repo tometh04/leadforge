@@ -55,7 +55,7 @@ El mensaje debe:
 - No superar 3 párrafos cortos
 - Primer párrafo: presentación breve (revisé tu sitio web)
 - Segundo párrafo: mencionar 1-2 problemas concretos traducidos a impacto de negocio (ej: "tu sitio no se ve bien en celular, y hoy el 70% de la gente busca desde el celu")
-- Tercer párrafo: pregunta abierta para iniciar conversación (NO incluir ningún link)
+- Tercer párrafo: cerrar con algo como "Me tomé el atrevimiento de armar una nueva web para vos, ya la tengo hecha. Si te interesa, en mi próximo mensaje te la envío, podés verla sin ningún tipo de compromiso."
 - Tono: amigable, directo, sin sonar a spam
 - NO incluir links ni URLs de ningún tipo
 - Máximo 2 emojis en todo el mensaje
@@ -91,5 +91,5 @@ Estuve revisando tu página web y encontré algunas cosas que podrían estar afe
 
 ${painText}
 
-¿Te copa que te cuente qué encontré?`
+Me tomé el atrevimiento de armar una nueva web para vos, ya la tengo hecha. Si te interesa, en mi próximo mensaje te la envío, podés verla sin ningún tipo de compromiso.`
 }
