@@ -1,5 +1,5 @@
 import { getAnthropicClient } from './client'
-import { withAnthropicRateLimitRetry } from './retry'
+import { isAIQuotaExceededError, withAIRateLimitRetry } from './retry'
 import { buildPrompt, mapLeadDataToScrapedWebsiteData } from './website-generator'
 
 export interface ScrapedBusinessData {
@@ -34,6 +34,9 @@ export type SiteGeneratorProvider = 'anthropic' | 'openai-compatible'
 
 type RequestError = Error & {
   status?: number
+  code?: string
+  providerErrorCode?: string
+  providerErrorType?: string
   headers?: Headers
   response?: {
     status?: number
@@ -216,7 +219,7 @@ async function generateWithAnthropic(prompt: { systemPrompt: string; userPrompt:
   const model = getAnthropicSiteGeneratorModel()
   const maxTokens = parseMaxTokens(32000)
 
-  const message = await withAnthropicRateLimitRetry('generateSiteHTML', async () => {
+  const message = await withAIRateLimitRetry('generateSiteHTML', async () => {
     const stream = anthropic.messages.stream({
       model,
       max_tokens: maxTokens,
@@ -241,7 +244,7 @@ async function generateWithOpenAICompatible(prompt: { systemPrompt: string; user
   const { model, requestUrl, headers, useResponsesApi } = buildOpenAICompatibleConfig()
   const maxTokens = parseMaxTokens(32_000)
 
-  return withAnthropicRateLimitRetry('generateSiteHTML', async () => {
+  return withAIRateLimitRetry('generateSiteHTML', async () => {
     const body = useResponsesApi
       ? { model, instructions: prompt.systemPrompt, input: prompt.userPrompt, max_output_tokens: maxTokens }
       : {
@@ -263,12 +266,21 @@ async function generateWithOpenAICompatible(prompt: { systemPrompt: string; user
     const payload = (await response.json().catch(() => ({}))) as unknown
     if (!response.ok) {
       const errorObj = toObject(toObject(payload).error)
+      const providerErrorCode =
+        typeof errorObj.code === 'string' ? errorObj.code : undefined
+      const providerErrorType =
+        typeof errorObj.type === 'string' ? errorObj.type : undefined
       const errorMessage =
         (typeof errorObj.message === 'string' && errorObj.message) ||
         `Request failed with status ${response.status}`
 
       const err = new Error(`[site-generator] ${errorMessage}`) as RequestError
       err.status = response.status
+      if (providerErrorCode) {
+        err.providerErrorCode = providerErrorCode
+        err.code = providerErrorCode
+      }
+      if (providerErrorType) err.providerErrorType = providerErrorType
       err.headers = response.headers
       err.response = { status: response.status, headers: response.headers, data: payload }
       throw err
@@ -307,7 +319,19 @@ async function generateSiteModelOutput(prompt: { systemPrompt: string; userPromp
   if (provider === 'anthropic') {
     return generateWithAnthropic(prompt)
   }
-  return generateWithOpenAICompatible(prompt)
+
+  try {
+    return await generateWithOpenAICompatible(prompt)
+  } catch (err) {
+    const canFallbackToAnthropic = !!process.env.ANTHROPIC_API_KEY?.trim()
+    if (isAIQuotaExceededError(err) && canFallbackToAnthropic) {
+      console.warn(
+        '[site-generator] OpenAI-compatible quota exceeded. Falling back to Anthropic for generateSiteHTML.'
+      )
+      return generateWithAnthropic(prompt)
+    }
+    throw err
+  }
 }
 
 export function getSiteGeneratorRuntimeInfo(): SiteGeneratorRuntimeInfo {

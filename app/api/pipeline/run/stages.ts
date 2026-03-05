@@ -4,7 +4,7 @@ import { quickLeadFilter, analyzeWebsite } from '@/lib/claude/scoring'
 import { scrapeSite } from '@/lib/scraper/site-scraper'
 import { generateSiteHTML, slugify, ScrapedBusinessData } from '@/lib/claude/site-generator'
 import { generateWhatsAppMessage, buildDefaultMessage } from '@/lib/claude/outreach'
-import { isAnthropicRateLimitError } from '@/lib/claude/retry'
+import { isAIRateLimitError, isAIQuotaExceededError } from '@/lib/claude/retry'
 import { createWhatsAppSocket, waitForConnection, formatPhoneToJid } from '@/lib/whatsapp/client'
 import type { ScraperResult } from '@/types'
 
@@ -280,7 +280,7 @@ export async function processStage(runId: string, stage: string, fromPhase: 'a' 
   } catch (err) {
     const errMsg = toErrorMessage(err)
 
-    if (isAnthropicRateLimitError(err)) {
+    if (isAIRateLimitError(err)) {
       console.warn(`[pipeline/stages] ${stage} RATE_LIMIT run=${runId} elapsed=${Date.now() - t0}ms`)
       await appendPipelineRunError(runId, {
         stage,
@@ -293,6 +293,23 @@ export async function processStage(runId: string, stage: string, fromPhase: 'a' 
       await supabase
         .from('pipeline_runs')
         .update({ status: 'running', updated_at: new Date().toISOString() })
+        .eq('id', runId)
+      return
+    }
+
+    if (isAIQuotaExceededError(err)) {
+      console.error(`[pipeline/stages] ${stage} QUOTA_EXCEEDED run=${runId} elapsed=${Date.now() - t0}ms`)
+      await appendPipelineRunError(runId, {
+        stage,
+        step: 'quota_exceeded',
+        error: errMsg,
+        code: 'quota_exceeded',
+      }).catch((appendErr) =>
+        console.error('[pipeline/error] Failed to append quota exceeded error', appendErr)
+      )
+      await supabase
+        .from('pipeline_runs')
+        .update({ status: 'failed', stage: 'error', updated_at: new Date().toISOString() })
         .eq('id', runId)
       return
     }
@@ -786,7 +803,7 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
       await updateRun({ sites_generated: sitesCount })
       console.log(`[pipeline/stages] generate_sites lead="${pl.business_name}" elapsed=${Date.now() - lt0}ms`)
     } catch (err) {
-      if (isAnthropicRateLimitError(err)) {
+      if (isAIRateLimitError(err)) {
         await updatePipelineLead(pl.id, {
           status: 'pending',
           error: 'Rate limit de IA. Reintentando automáticamente.',
@@ -797,6 +814,19 @@ async function stageGenerateSites(runId: string, config: PipelineConfig, fromPha
           businessName: pl.business_name,
           error: toErrorMessage(err, 'Rate limit de IA'),
           code: 'rate_limit',
+          cause: err,
+        })
+        throw err
+      }
+      if (isAIQuotaExceededError(err)) {
+        const quotaMsg = 'Cuota de IA agotada. Revisá plan y facturación del proveedor.'
+        await updatePipelineLead(pl.id, { status: 'error', error: quotaMsg })
+        await reportError({
+          step: 'generate_site',
+          leadId: pl.lead_id,
+          businessName: pl.business_name,
+          error: toErrorMessage(err, quotaMsg),
+          code: 'quota_exceeded',
           cause: err,
         })
         throw err
@@ -881,7 +911,7 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig, from
           lead.score_details
         )
       } catch (err) {
-        if (isAnthropicRateLimitError(err)) throw err
+        if (isAIRateLimitError(err) || isAIQuotaExceededError(err)) throw err
         message = buildDefaultMessage(lead.business_name, lead.score_details)
       }
 
@@ -889,7 +919,7 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig, from
       messagesCount++
       console.log(`[pipeline/stages] generate_messages lead="${pl.business_name}" elapsed=${Date.now() - lt0}ms`)
     } catch (err) {
-      if (isAnthropicRateLimitError(err)) {
+      if (isAIRateLimitError(err)) {
         await updatePipelineLead(pl.id, {
           status: 'pending',
           error: 'Rate limit de IA. Reintentando automáticamente.',
@@ -900,6 +930,19 @@ async function stageGenerateMessages(runId: string, config: PipelineConfig, from
           businessName: pl.business_name,
           error: toErrorMessage(err, 'Rate limit de IA'),
           code: 'rate_limit',
+          cause: err,
+        })
+        throw err
+      }
+      if (isAIQuotaExceededError(err)) {
+        const quotaMsg = 'Cuota de IA agotada. Revisá plan y facturación del proveedor.'
+        await updatePipelineLead(pl.id, { status: 'error', error: quotaMsg })
+        await reportError({
+          step: 'generate_message',
+          leadId: pl.lead_id,
+          businessName: pl.business_name,
+          error: toErrorMessage(err, quotaMsg),
+          code: 'quota_exceeded',
           cause: err,
         })
         throw err
@@ -1392,6 +1435,34 @@ async function processOneLead(
       await updateRun({ sites_generated: counters.sitesGenerated })
       console.log(`[pipeline/stages] process lead="${pl.business_name}" generate_site elapsed=${Date.now() - lt0}ms`)
     } catch (err) {
+      if (isAIRateLimitError(err)) {
+        await updatePipelineLead(pl.id as string, {
+          status: 'pending',
+          error: 'Rate limit de IA. Reintentando automáticamente.',
+        })
+        await reportError({
+          step: 'generate_site',
+          leadId: pl.lead_id as string,
+          businessName: pl.business_name as string,
+          error: toErrorMessage(err, 'Rate limit de IA'),
+          code: 'rate_limit',
+          cause: err,
+        })
+        throw err
+      }
+      if (isAIQuotaExceededError(err)) {
+        const quotaMsg = 'Cuota de IA agotada. Revisá plan y facturación del proveedor.'
+        await updatePipelineLead(pl.id as string, { status: 'error', error: quotaMsg })
+        await reportError({
+          step: 'generate_site',
+          leadId: pl.lead_id as string,
+          businessName: pl.business_name as string,
+          error: toErrorMessage(err, quotaMsg),
+          code: 'quota_exceeded',
+          cause: err,
+        })
+        throw err
+      }
       console.log(`[pipeline/stages] process lead="${pl.business_name}" generate_site elapsed=${Date.now() - lt0}ms ERROR`)
       const errMsg = toErrorMessage(err, 'Error generando sitio')
       await updatePipelineLead(pl.id as string, { status: 'error', error: errMsg })
@@ -1445,7 +1516,7 @@ async function processOneLead(
           lead.score_details
         )
       } catch (err) {
-        if (isAnthropicRateLimitError(err)) throw err
+        if (isAIRateLimitError(err) || isAIQuotaExceededError(err)) throw err
         message = buildDefaultMessage(lead.business_name, lead.score_details)
       }
 
@@ -1455,6 +1526,34 @@ async function processOneLead(
       counters.messagesGenerated++
       console.log(`[pipeline/stages] process lead="${pl.business_name}" generate_message elapsed=${Date.now() - lt0}ms`)
     } catch (err) {
+      if (isAIRateLimitError(err)) {
+        await updatePipelineLead(pl.id as string, {
+          status: 'pending',
+          error: 'Rate limit de IA. Reintentando automáticamente.',
+        })
+        await reportError({
+          step: 'generate_message',
+          leadId: pl.lead_id as string,
+          businessName: pl.business_name as string,
+          error: toErrorMessage(err, 'Rate limit de IA'),
+          code: 'rate_limit',
+          cause: err,
+        })
+        throw err
+      }
+      if (isAIQuotaExceededError(err)) {
+        const quotaMsg = 'Cuota de IA agotada. Revisá plan y facturación del proveedor.'
+        await updatePipelineLead(pl.id as string, { status: 'error', error: quotaMsg })
+        await reportError({
+          step: 'generate_message',
+          leadId: pl.lead_id as string,
+          businessName: pl.business_name as string,
+          error: toErrorMessage(err, quotaMsg),
+          code: 'quota_exceeded',
+          cause: err,
+        })
+        throw err
+      }
       console.log(`[pipeline/stages] process lead="${pl.business_name}" generate_message elapsed=${Date.now() - lt0}ms ERROR`)
       const errMsg = toErrorMessage(err, 'Error generando mensaje')
       await updatePipelineLead(pl.id as string, { status: 'error', error: errMsg })
