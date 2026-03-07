@@ -231,7 +231,7 @@ function extractOpenAIText(payload: unknown): string {
 async function generateWithAnthropic(prompt: { systemPrompt: string; userPrompt: string }): Promise<string> {
   const anthropic = getAnthropicClient()
   const model = getAnthropicSiteGeneratorModel()
-  const maxTokens = parseMaxTokens(32000)
+  const maxTokens = parseMaxTokens(64000)
   const maxRateLimitAttempts = parseRateLimitMaxAttempts(1)
 
   const message = await withAIRateLimitRetry('generateSiteHTML', async () => {
@@ -257,7 +257,7 @@ async function generateWithAnthropic(prompt: { systemPrompt: string; userPrompt:
 
 async function generateWithOpenAICompatible(prompt: { systemPrompt: string; userPrompt: string }): Promise<string> {
   const { model, requestUrl, headers, useResponsesApi } = buildOpenAICompatibleConfig()
-  const maxTokens = parseMaxTokens(32_000)
+  const maxTokens = parseMaxTokens(64_000)
   const maxRateLimitAttempts = parseRateLimitMaxAttempts(1)
 
   return withAIRateLimitRetry('generateSiteHTML', async () => {
