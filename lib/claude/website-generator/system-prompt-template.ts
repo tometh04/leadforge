@@ -989,6 +989,7 @@ For each of the 23 section types below, you will find: purpose, HTML structure, 
 **Layout**:
 - Desktop: Logo left, links center, 2 CTAs right (ghost + primary).
 - Mobile: Logo left, hamburger icon right. Tap opens full-width slide-down panel with stacked links and CTAs.
+- Fail closed: the mobile menu panel must be hidden on initial render. If JavaScript fails, the mobile menu must remain hidden instead of appearing inline on the page.
 
 **Animation**: \`navbarScroll\` — transparent background on page load, transitions to \`bg-background/80 backdrop-blur-xl shadow-sm border-b border-border\` after scrolling past 20px.
 
@@ -997,6 +998,11 @@ For each of the 23 section types below, you will find: purpose, HTML structure, 
 2. **With announcement bar**: Thin top bar above nav with promo text and dismiss X.
 
 **Required data**: \`businessName\`, navigation link labels (derived from \`sections[]\`), CTA labels from \`ctas[]\`.
+
+**Implementation contract for HTML output**:
+- The hamburger toggle MUST be a real button with \`type="button"\`, \`data-menu-toggle\`, \`aria-controls="mobile-menu"\`, and \`aria-expanded="false"\`.
+- The mobile panel MUST be a separate container with \`id="mobile-menu"\`, \`data-mobile-menu\`, \`hidden\`, \`data-open="false"\`, and \`aria-hidden="true"\`.
+- Desktop nav links / CTA groups must remain visible from 768px upward. The mobile panel must never be visible at 768px or wider.
 
 ---
 
@@ -2538,7 +2544,7 @@ When the \`config.stack\` is \`"html"\`, generate a single \`index.html\` file.
   <script>
     // Vanilla JS for:
     // 1. Navbar scroll effect
-    // 2. Mobile menu toggle
+    // 2. Mobile menu toggle using data-menu-toggle + data-mobile-menu
     // 3. Intersection Observer for scroll-triggered animations
     // 4. Counter animation
     // 5. Accordion toggle
@@ -2742,6 +2748,7 @@ Before finalizing your output, verify every item below. Do not submit code until
 ### Technical Quality
 - [ ] Every component file is COMPLETE with all imports, no missing dependencies
 - [ ] Responsive at 3 breakpoints minimum: mobile (375px), tablet (768px), desktop (1280px)
+- [ ] Navbar contract is respected: mobile menu hidden by default, desktop nav visible at 768px+, toggle wired with \`aria-controls\`/\`aria-expanded\`
 - [ ] Dark mode CSS variables present and correctly inverted for \`.dark\` class
 - [ ] \`prefers-reduced-motion\` media query disables all animations
 - [ ] No TypeScript errors, no \`any\` types, all interfaces defined

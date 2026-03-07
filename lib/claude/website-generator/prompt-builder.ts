@@ -374,6 +374,14 @@ export function buildUserPrompt(
   )
   parts.push('')
 
+  parts.push('## Navbar Safety Contract')
+  parts.push('- The mobile menu must stay closed on first paint and remain hidden if JavaScript fails.')
+  parts.push('- Use a real menu toggle button: `type="button" data-menu-toggle aria-controls="mobile-menu" aria-expanded="false"`.')
+  parts.push('- Use a dedicated mobile menu panel: `id="mobile-menu" data-mobile-menu hidden data-open="false" aria-hidden="true"`.')
+  parts.push('- Desktop navigation links and desktop CTA groups must stay visible at tablet/desktop widths; the mobile panel must never be visible at widths >= 768px.')
+  parts.push('- The hamburger toggle must be mobile-only, and the mobile panel must contain the same anchor links and CTAs as the desktop navbar.')
+  parts.push('')
+
   // -- Color system
   parts.push('## Color System (OKLCH CSS Variables)')
   parts.push('```css')

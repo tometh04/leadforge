@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { stabilizeGeneratedSiteHtml } from '@/lib/claude/generated-site-stabilizer'
 import { createClient } from '@/lib/supabase/server'
 
 export async function GET(
@@ -25,14 +26,16 @@ export async function GET(
     })
   }
 
-  const html = (lead.score_details as Record<string, unknown>)?.site_html as string | undefined
+  const rawHtml = (lead.score_details as Record<string, unknown>)?.site_html as string | undefined
 
-  if (!html) {
+  if (!rawHtml) {
     return new NextResponse('<h1>Sitio no disponible</h1>', {
       status: 404,
       headers: { 'Content-Type': 'text/html' },
     })
   }
+
+  const html = stabilizeGeneratedSiteHtml(rawHtml)
 
   return new NextResponse(html, {
     status: 200,

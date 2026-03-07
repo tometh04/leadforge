@@ -1,4 +1,5 @@
 import { getAnthropicClient } from './client'
+import { stabilizeGeneratedSiteHtml } from './generated-site-stabilizer'
 import { isAIQuotaExceededError, withAIRateLimitRetry } from './retry'
 import { buildPrompt, mapLeadDataToScrapedWebsiteData } from './website-generator'
 
@@ -468,14 +469,14 @@ export async function generateSiteHTML(params: SiteGenerationParams): Promise<st
 
   // Extraer el HTML de la respuesta
   const htmlMatch = text.match(/<!DOCTYPE\s+html[\s\S]*<\/html>/i)
-  if (htmlMatch) return htmlMatch[0]
+  if (htmlMatch) return stabilizeGeneratedSiteHtml(htmlMatch[0])
 
   const htmlTagMatch = text.match(/<html[\s\S]*<\/html>/i)
-  if (htmlTagMatch) return `<!DOCTYPE html>\n${htmlTagMatch[0]}`
+  if (htmlTagMatch) return stabilizeGeneratedSiteHtml(`<!DOCTYPE html>\n${htmlTagMatch[0]}`)
 
   // Si la respuesta ya parece ser HTML puro
   if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
-    return text.trim()
+    return stabilizeGeneratedSiteHtml(text.trim())
   }
 
   throw new Error(
