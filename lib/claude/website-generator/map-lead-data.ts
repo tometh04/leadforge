@@ -15,33 +15,39 @@ import type {
   ContactInfo,
   SocialLinks,
   Service,
+  ColorPalette,
+  FontConfig,
 } from './types'
+import { findIndustryDesign, getDefaultIndustryDesign } from './industry-design-data'
 
-/** Industry-specific default primary color (hex) when no detected color is available. */
-const INDUSTRY_DEFAULT_COLORS: Record<string, string> = {
-  restaurant: '#8B4513',
-  cafe: '#6F4E37',
-  dental_clinic: '#2563EB',
-  medical: '#0284C7',
-  gym: '#EA580C',
-  fitness: '#DC2626',
-  saas: '#7C3AED',
-  tech: '#6366F1',
-  ecommerce: '#059669',
-  real_estate: '#B8860B',
-  education: '#0369A1',
-  legal: '#1E3A5F',
-  beauty_salon: '#DB2777',
-  hotel: '#B8860B',
-  construction: '#D97706',
+function inferPalette(category: string, detectedColors?: string[]): ColorPalette {
+  const design = findIndustryDesign(category) ?? getDefaultIndustryDesign()
+  const pal = design.palette
+
+  if (detectedColors && detectedColors.length > 0) {
+    // Use detected primary, fill the rest from industry defaults
+    return {
+      primary: detectedColors[0],
+      secondary: detectedColors[1] ?? pal.secondary,
+      accent: detectedColors[2] ?? pal.cta,
+      background: pal.background,
+      foreground: pal.text,
+    }
+  }
+
+  return {
+    primary: pal.primary,
+    secondary: pal.secondary,
+    accent: pal.cta,
+    background: pal.background,
+    foreground: pal.text,
+  }
 }
 
-function inferPrimaryColor(category: string, detectedColors?: string[]): string {
-  if (detectedColors && detectedColors.length > 0) {
-    return detectedColors[0]
-  }
-  const normalized = category.toLowerCase().trim().replace(/[\s-]+/g, '_')
-  return INDUSTRY_DEFAULT_COLORS[normalized] ?? '#3B82F6'
+function inferFonts(category: string): FontConfig {
+  const design = findIndustryDesign(category)
+  if (!design) return {}
+  return { heading: design.fontPair.heading, body: design.fontPair.body }
 }
 
 function mapSocialLinks(
@@ -348,11 +354,14 @@ export function mapLeadDataToScrapedWebsiteData(
   // --- Extract services from raw text ---
   const extractedServices = extractServicesFromText(scraped?.visibleText, scraped?.subPagesText)
 
-  // --- Primary color ---
-  const primaryColor = inferPrimaryColor(
+  // --- Color palette (full industry-aware fallback) ---
+  const colorPalette = inferPalette(
     category,
     (params as SiteGenerationParams & { detectedColors?: string[] }).detectedColors
   )
+
+  // --- Font pair (industry-aware, only used as fallback when scraper doesn't detect fonts) ---
+  const fonts = inferFonts(category)
 
   return {
     url: scraped?.visibleText ? 'scraped' : 'no-website',
@@ -368,8 +377,8 @@ export function mapLeadDataToScrapedWebsiteData(
     stats,
     services: extractedServices.length >= 2 ? extractedServices : undefined,
     gallery: gallery.length >= 3 ? gallery : undefined,
-    colorPalette: { primary: primaryColor },
-    fonts: {},
+    colorPalette,
+    fonts,
     images,
     sections: [],
     contact,

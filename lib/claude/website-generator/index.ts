@@ -1,3 +1,5 @@
 export { buildPrompt } from './prompt-builder'
 export { mapLeadDataToScrapedWebsiteData } from './map-lead-data'
+export { findIndustryDesign, getDefaultIndustryDesign } from './industry-design-data'
 export type { ScrapedWebsiteData, GeneratedPrompt, GenerationConfig } from './types'
+export type { IndustryDesign } from './industry-design-data'

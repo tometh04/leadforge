@@ -16,6 +16,8 @@ import type {
 } from './types'
 import { SECTION_RULES } from './types'
 import { SYSTEM_PROMPT_TEMPLATE } from './system-prompt-template'
+import { findIndustryDesign, getDefaultIndustryDesign } from './industry-design-data'
+import type { IndustryDesign } from './industry-design-data'
 
 // ============================================================
 // Constants
@@ -75,8 +77,9 @@ export function buildPrompt(data: ScrapedWebsiteData): GeneratedPrompt {
   // 2. Build the OKLCH color system from the scraped hex palette
   const colorSystem = buildColorSystem(data.colorPalette)
 
-  // 3. Order sections for optimal conversion funnel
-  const orderedSections = buildSectionOrder(selectedSections)
+  // 3. Order sections using industry-aware ordering
+  const design = findIndustryDesign(data.industry)
+  const orderedSections = buildSectionOrder(selectedSections, design?.prioritySections)
 
   // 4. Assemble the user-facing prompt body
   const userPrompt = buildUserPrompt(data, orderedSections, colorSystem)
@@ -134,11 +137,18 @@ export function selectSections(data: ScrapedWebsiteData): SectionType[] {
     }
   }
 
-  // Sort by priority
+  // Sort by priority — boost sections that appear in the industry's recommended list
+  const design = findIndustryDesign(data.industry)
+  const industryPriority = design?.prioritySections ?? []
+  const industryBoost = new Map(industryPriority.map((s, i) => [s, i]))
+
   const priorityMap = new Map(SECTION_RULES.map((r) => [r.type, r.priority]))
   selected.sort((a, b) => {
-    const pa = priorityMap.get(a) ?? 99
-    const pb = priorityMap.get(b) ?? 99
+    // Industry-recommended sections get a priority boost (lower = higher priority)
+    const boostA = industryBoost.has(a) ? -1 : 0
+    const boostB = industryBoost.has(b) ? -1 : 0
+    const pa = (priorityMap.get(a) ?? 99) + boostA
+    const pb = (priorityMap.get(b) ?? 99) + boostB
     return pa - pb
   })
 
@@ -261,14 +271,54 @@ export function buildColorSystem(palette: ColorPalette): string {
 // Section Ordering
 // ============================================================
 
-export function buildSectionOrder(sections: SectionType[]): SectionType[] {
-  const orderIndex = new Map(SECTION_ORDER.map((s, i) => [s, i]))
+export function buildSectionOrder(
+  sections: SectionType[],
+  industryPriority?: SectionType[]
+): SectionType[] {
+  // If we have industry-specific section ordering, use it as the primary order
+  // with the canonical SECTION_ORDER as fallback for sections not in the industry list
+  const effectiveOrder = industryPriority
+    ? buildMergedOrder(industryPriority)
+    : SECTION_ORDER
+
+  const orderIndex = new Map(effectiveOrder.map((s, i) => [s, i]))
 
   const known = sections.filter((s) => orderIndex.has(s)).sort((a, b) => orderIndex.get(a)! - orderIndex.get(b)!)
 
   const unknown = sections.filter((s) => !orderIndex.has(s))
 
   return [...known, ...unknown]
+}
+
+/**
+ * Merges industry priority sections with the canonical order.
+ * Industry sections come first (wrapped with navbar/footer), then remaining
+ * canonical sections fill in gaps.
+ */
+function buildMergedOrder(industryPriority: SectionType[]): SectionType[] {
+  const merged: SectionType[] = ['navbar']
+  const added = new Set<SectionType>(['navbar', 'footer', 'final_cta'])
+
+  // Add industry priority sections in their recommended order
+  for (const s of industryPriority) {
+    if (!added.has(s)) {
+      merged.push(s)
+      added.add(s)
+    }
+  }
+
+  // Fill in remaining sections from canonical order
+  for (const s of SECTION_ORDER) {
+    if (!added.has(s)) {
+      merged.push(s)
+      added.add(s)
+    }
+  }
+
+  // Always end with final_cta + footer
+  merged.push('final_cta', 'footer')
+
+  return merged
 }
 
 // ============================================================
@@ -547,158 +597,23 @@ export function hexToOklch(hex: string): { l: number; c: number; h: number } {
 // Industry Context Generator
 // ============================================================
 
-const INDUSTRY_CONTEXT: Record<string, string> = {
-  restaurant: [
-    'This is a restaurant website. Prioritize high-quality food photography, the menu,',
-    'and reservation/ordering CTAs. Use warm, appetizing color tones. The hero should',
-    'feature a signature dish or the restaurant ambiance. Include operating hours',
-    'prominently. Testimonials should emphasize the dining experience. If there are',
-    'stats, focus on years of service, dishes served, or happy customers. The overall',
-    'feel should be inviting and sensory — the visitor should almost taste the food.',
-  ].join(' '),
-
-  cafe: [
-    'This is a cafe/coffee shop website. Emphasize a cozy, relaxed atmosphere with',
-    'warm earth tones. Feature specialty drinks and the cafe space prominently in the',
-    'hero. Include the menu with clear categories (coffee, pastries, meals). Highlight',
-    'the social/community aspect. Operating hours and location should be easy to find.',
-    'WiFi availability, ambiance photos, and loyalty programs are strong differentiators.',
-  ].join(' '),
-
-  dental_clinic: [
-    'This is a dental clinic website. Trust and professionalism are paramount. Use',
-    'clean whites and blues. Feature the dental team with credentials. Emphasize',
-    'patient comfort, modern equipment, and pain-free procedures. Include insurance',
-    'information and appointment booking as a primary CTA. Testimonials should focus',
-    'on patient satisfaction and anxiety reduction. Before/after galleries are highly',
-    'effective for cosmetic dentistry services.',
-  ].join(' '),
-
-  medical: [
-    'This is a medical/healthcare website. Prioritize trust, credibility, and',
-    'accessibility. Use clean, calming colors (blues, greens, whites). Feature doctor',
-    'credentials and specializations prominently. Make appointment booking the primary',
-    'CTA. Include accepted insurance, emergency contact info, and operating hours.',
-    'Ensure WCAG accessibility compliance. Patient testimonials should emphasize care',
-    'quality and professionalism.',
-  ].join(' '),
-
-  gym: [
-    'This is a gym/fitness center website. Use energetic, bold design with strong',
-    'contrasts. Feature action shots of the facility, equipment, and group classes.',
-    'Membership plans should be front and center with clear pricing comparison.',
-    'Include class schedules, trainer profiles, and transformation stories.',
-    'The hero should be motivational. CTAs should push free trials or membership signup.',
-    'Stats work well here: members, classes per week, years open.',
-  ].join(' '),
-
-  fitness: [
-    'This is a fitness/personal training website. Emphasize transformation, results,',
-    'and expertise. Feature trainer certifications and specializations. Before/after',
-    'sections are highly effective. Include program details, pricing, and scheduling.',
-    'Testimonials should focus on measurable results. Use dynamic, energetic imagery.',
-    'The hero should convey empowerment and capability. Free consultation should be',
-    'the primary CTA.',
-  ].join(' '),
-
-  saas: [
-    'This is a SaaS product website. Focus on the value proposition and product demo',
-    'in the hero. Use social proof heavily — logos, testimonials, stats. Feature an',
-    'interactive or visual product showcase. Pricing should be transparent with clear',
-    'tier differentiation. Include a FAQ section addressing common objections.',
-    'Integration logos build trust. The design should be modern, clean, and tech-forward.',
-    'CTAs should push free trial or demo signup.',
-  ].join(' '),
-
-  tech: [
-    'This is a technology company website. Emphasize innovation, expertise, and',
-    'cutting-edge solutions. Use a modern, minimal design with strong typography.',
-    'Feature case studies or product showcases. Include the tech stack or methodology.',
-    'Team section should highlight expertise and credentials. Stats should demonstrate',
-    'impact (clients served, uptime, projects delivered). The hero should communicate',
-    'the core value proposition in under 6 words.',
-  ].join(' '),
-
-  ecommerce: [
-    'This is an e-commerce website. Product presentation is everything. Use high-quality',
-    'product photography with clean backgrounds. Feature bestsellers or new arrivals in',
-    'the hero. Include trust badges, shipping info, and return policy prominently.',
-    'Testimonials should include product-specific reviews. Categories should be clear',
-    'and browsable. The gallery section should showcase products in context/lifestyle.',
-    'CTAs push toward browsing or featured product purchase.',
-  ].join(' '),
-
-  real_estate: [
-    'This is a real estate website. High-quality property photography is essential.',
-    'The hero should feature a stunning property or the brand promise. Include property',
-    'search/filtering prominently. Agent profiles with credentials build trust.',
-    'Testimonials from satisfied buyers/sellers are powerful. Stats should show',
-    'properties sold, years of experience, and average sale time. Neighborhood guides',
-    'and market insights add value. Contact/scheduling should be readily accessible.',
-  ].join(' '),
-
-  education: [
-    'This is an education/learning website. Trust and credibility are key. Feature',
-    'course offerings, instructor credentials, and student success stories. The hero',
-    'should communicate the transformational outcome of the education. Include curriculum',
-    'details, pricing/enrollment info, and accreditations. Testimonials from graduates',
-    'carry strong weight. Stats should highlight graduation rates, student count, and',
-    'career placement. FAQ should address admissions, schedule, and prerequisites.',
-  ].join(' '),
-
-  legal: [
-    'This is a legal services website. Professionalism and authority are paramount.',
-    'Use a conservative, trustworthy color palette (navy, charcoal, burgundy). Feature',
-    'attorney profiles with bar admissions, specializations, and case experience.',
-    'Practice areas should be clearly organized. Testimonials must demonstrate results',
-    'while maintaining client confidentiality. The hero should convey strength and',
-    'reliability. Free consultation should be the primary CTA. Include awards,',
-    'memberships, and media mentions.',
-  ].join(' '),
-
-  beauty_salon: [
-    'This is a beauty salon/spa website. Aesthetics and visual appeal are everything.',
-    'Use elegant, refined design with the brand\'s signature colors. Feature stunning',
-    'before/after transformations and service showcases. Include the full service menu',
-    'with pricing. Team profiles should highlight stylist specializations and portfolios.',
-    'The gallery should showcase best work. Booking should be the primary CTA with',
-    'online scheduling. Testimonials should include photos when possible.',
-  ].join(' '),
-
-  hotel: [
-    'This is a hotel/hospitality website. Immersive visuals are critical — feature',
-    'room interiors, amenities, views, and the property exterior. The hero should be',
-    'a full-bleed atmospheric shot. Include room types with clear pricing, amenity',
-    'lists, and location highlights. Guest testimonials should emphasize the experience.',
-    'Nearby attractions and dining options add value. Booking/reservation should be',
-    'the primary CTA with date selection. Stats can show guest count, rating, or awards.',
-  ].join(' '),
-
-  construction: [
-    'This is a construction/contracting website. Showcase completed projects with',
-    'high-quality photography. Before/after sections are highly effective here.',
-    'Feature services offered, project types, and geographic coverage. Team section',
-    'should highlight certifications, licensing, and years of experience. Testimonials',
-    'from property owners and developers build trust. Stats should show projects',
-    'completed, years in business, and team size. The hero should feature an impressive',
-    'completed project. Free estimate should be the primary CTA.',
-  ].join(' '),
+export function generateIndustryContext(industry: string): string {
+  const design = findIndustryDesign(industry) ?? getDefaultIndustryDesign()
+  return formatDesignContext(design, industry)
 }
 
-export function generateIndustryContext(industry: string): string {
-  const normalized = industry.toLowerCase().trim().replace(/[\s-]+/g, '_')
+function formatDesignContext(design: IndustryDesign, industry: string): string {
+  const r = design.rule
+  const lines: string[] = []
 
-  if (INDUSTRY_CONTEXT[normalized]) {
-    return INDUSTRY_CONTEXT[normalized]
-  }
+  lines.push(`**Industry Match:** ${design.name}`)
+  lines.push(`**Recommended Pattern:** ${r.pattern}`)
+  lines.push(`**Style Priority:** ${r.stylePriority}`)
+  lines.push(`**Key Effects:** ${r.keyEffects}`)
+  lines.push(`**Must-have elements:** ${r.mustHave}`)
+  lines.push(`**Anti-patterns (AVOID):** ${r.antiPatterns}`)
+  lines.push('')
+  lines.push(`**Recommended section priority:** ${design.prioritySections.join(' > ')}`)
 
-  return [
-    `This is a ${industry} business website. Focus on clearly communicating the`,
-    'core value proposition in the hero section. Build trust through social proof,',
-    'testimonials, and professional presentation. Make the primary call-to-action',
-    'prominent and accessible throughout the page. Use the brand\'s color palette',
-    'consistently. Ensure the design is modern, clean, and mobile-responsive.',
-    'Highlight what differentiates this business from competitors. Include all',
-    'relevant contact information and make it easy for visitors to take the next step.',
-  ].join(' ')
+  return lines.join('\n')
 }
