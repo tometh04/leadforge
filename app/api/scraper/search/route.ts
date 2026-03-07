@@ -28,13 +28,31 @@ export async function POST(req: NextRequest) {
     const placeIds = places.map((p) => p.place_id)
     const { data: existingLeads } = await supabase
       .from('leads')
-      .select('place_id')
+      .select('place_id, status')
       .eq('user_id', user.id)
       .in('place_id', placeIds)
-    const existingIds = new Set(existingLeads?.map((l) => l.place_id) ?? [])
+
+    const siteGeneratedStatuses = new Set([
+      'sitio_generado',
+      'contactado',
+      'en_negociacion',
+      'cerrado',
+    ])
+    const siteGeneratedIds = new Set(
+      existingLeads
+        ?.filter((l) => siteGeneratedStatuses.has(l.status))
+        .map((l) => l.place_id) ?? []
+    )
+    const existingIds = new Set(
+      existingLeads
+        ?.filter((l) => !siteGeneratedStatuses.has(l.status))
+        .map((l) => l.place_id) ?? []
+    )
 
     // 3. Filtro de franquicias con Claude (en paralelo para todos los leads nuevos)
-    let resultsWithFlags = places.map((place) => ({
+    let resultsWithFlags = places
+      .filter((p) => !siteGeneratedIds.has(p.place_id))
+      .map((place) => ({
       ...place,
       already_imported: existingIds.has(place.place_id),
       viable: true,
