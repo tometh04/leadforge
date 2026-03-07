@@ -428,7 +428,7 @@ const INDUSTRY_DATABASE: IndustryDesign[] = [
       'education', 'educacion', 'school', 'escuela', 'colegio', 'curso',
       'course', 'academia', 'institute', 'instituto', 'capacitacion',
       'training', 'taller', 'workshop', 'clases particulares', 'tutor',
-      'universidad', 'jardin de infantes', 'guarderia',
+      'universidad',
     ],
     palette: { primary: '#4F46E5', secondary: '#818CF8', cta: '#F97316', background: '#EEF2FF', text: '#1E1B4B', border: '#C7D2FE' },
     rule: {
@@ -445,7 +445,7 @@ const INDUSTRY_DATABASE: IndustryDesign[] = [
     name: 'Childcare / Daycare',
     keywords: [
       'childcare', 'daycare', 'guarderia', 'jardin maternal', 'jardin de infantes',
-      'nursery', 'ninos', 'kids', 'infantil',
+      'jardin infantil', 'nursery', 'ninos', 'kids', 'infantil', 'preescolar',
     ],
     palette: { primary: '#F472B6', secondary: '#FBCFE8', cta: '#22C55E', background: '#FDF2F8', text: '#9D174D', border: '#FCE7F3' },
     rule: {
