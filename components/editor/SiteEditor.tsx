@@ -245,11 +245,24 @@ export default function SiteEditor({
           canvasDoc.head.appendChild(overrides)
         }
 
-        // Apply body attributes (class, style, etc.) to wrapper
+        // Apply body attributes (class, style, etc.) to wrapper model
+        // AND directly to the canvas body DOM element (GrapesJS wrapper
+        // model doesn't reliably render `style`/`class` on the actual body)
         if (Object.keys(parsed.bodyAttrsMap).length > 0) {
           const wrapper = ed.DomComponents.getWrapper()
           if (wrapper) {
             wrapper.addAttributes(parsed.bodyAttrsMap)
+          }
+          if (canvasDoc) {
+            for (const [attr, val] of Object.entries(parsed.bodyAttrsMap)) {
+              if (attr === 'class') {
+                val.split(/\s+/).filter(Boolean).forEach((cls) => {
+                  canvasDoc.body.classList.add(cls)
+                })
+              } else {
+                canvasDoc.body.setAttribute(attr, val)
+              }
+            }
           }
         }
 
@@ -278,7 +291,14 @@ export default function SiteEditor({
   }, [])
 
   const buildFullHtml = useCallback((ed: Editor) => {
-    const bodyInner = ed.getHtml()
+    let bodyInner = ed.getHtml()
+    // GrapesJS 0.22 getHtml() includes the wrapper <body> tag — strip it
+    // to avoid nested <body> tags in the output
+    const bodyWrapMatch = bodyInner.match(
+      /^<body[^>]*>([\s\S]*)<\/body>\s*$/
+    )
+    if (bodyWrapMatch) bodyInner = bodyWrapMatch[1]
+
     const editorCss = ed.getCss({ avoidProtected: true }) ?? ''
     const bodyScripts = bodyScriptsRef.current.join('\n')
     const attrsStr = Object.entries(bodyAttrsRef.current)
