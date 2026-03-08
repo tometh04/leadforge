@@ -44,6 +44,8 @@ export interface ScoreDetails {
   modernity: number
   problems: string[]
   summary: string
+  site_html?: string
+  site_slug?: string
 }
 
 export interface Message {

@@ -7,8 +7,9 @@ import { ScoreBadge } from './ScoreBadge'
 import { StatusBadge, STATUS_LABELS } from './StatusBadge'
 import {
   ExternalLink, Phone, MapPin, Globe, ChevronDown, ChevronUp,
-  Loader2, Wand2, MessageSquare, RefreshCw, Clock, X, Star,
+  Loader2, Wand2, MessageSquare, RefreshCw, Clock, X, Star, Pencil,
 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
@@ -45,6 +46,7 @@ export function LeadCardModal({
   lead, activity, open, onClose, onUpdate,
   onAnalyze, analyzing, onGenerateSite, generatingSite, onOpenWhatsApp,
 }: LeadCardModalProps) {
+  const router = useRouter()
   const [notes, setNotes] = useState(lead?.notes ?? '')
   const [savingNotes, setSavingNotes] = useState(false)
   const [showProblems, setShowProblems] = useState(false)
@@ -348,6 +350,16 @@ export function LeadCardModal({
                     style={{ background: '#3f3f46', color: '#a1a1aa' }}>
                     {lead.generated_site_url}
                   </div>
+                  <button
+                    onClick={() => { onClose(); router.push(`/editor/${lead.id}`) }}
+                    className="flex items-center gap-1.5 text-xs font-medium shrink-0 transition-colors"
+                    style={{ color: '#a1a1aa' }}
+                    onMouseOver={e => (e.currentTarget.style.color = '#ffffff')}
+                    onMouseOut={e => (e.currentTarget.style.color = '#a1a1aa')}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                    Editar
+                  </button>
                   <a href={lead.generated_site_url} target="_blank" rel="noopener noreferrer"
                     className="flex items-center gap-1.5 text-xs font-medium shrink-0 transition-colors"
                     style={{ color: '#a1a1aa' }}
@@ -413,6 +425,15 @@ export function LeadCardModal({
                   <ExternalLink className="h-4 w-4" />
                   Ver sitio completo
                 </a>
+              )}
+
+              {lead.generated_site_url && (
+                <Button variant="outline"
+                  className="w-full justify-start gap-2 h-9 text-sm"
+                  onClick={() => { onClose(); router.push(`/editor/${lead.id}`) }}>
+                  <Pencil className="h-4 w-4" />
+                  Editar sitio
+                </Button>
               )}
 
               <Button variant="outline"

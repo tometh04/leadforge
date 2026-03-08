@@ -132,6 +132,15 @@ All colors are defined as CSS custom properties using OKLCH color space for perc
 | Construction | 30 | Warm oranges feel solid and reliable |
 | Ecommerce | (brand-dependent) | Use the brand's actual primary color |
 
+#### Color Distribution: The 60-30-10 Rule
+
+Apply color by visual weight, not pixel count:
+- **60%** — Neutral backgrounds, whitespace, base surfaces (\`var(--background)\`, \`var(--card)\`, \`var(--muted)\`)
+- **30%** — Secondary colors: text, borders, inactive states (\`var(--foreground)\`, \`var(--muted-foreground)\`, \`var(--border)\`)
+- **10%** — Accent/Primary: CTAs, highlights, focus states, key interactive elements (\`var(--primary)\`, \`var(--ring)\`)
+
+The primary/accent color works BECAUSE it's rare. Using it everywhere dilutes its impact. Buttons, links, and key highlights should be the only elements using \`var(--primary)\` as background or text color.
+
 ### 2.2 Typography
 
 #### Recommended Font Pairs
@@ -160,6 +169,20 @@ text-6xl:  3.75rem  (60px) — hero headline (desktop)
 text-7xl:  4.5rem   (72px) — hero headline (large desktop)
 \`\`\`
 
+#### Fluid Typography (Recommended for Hero & Section Titles)
+
+For smoother scaling between breakpoints, prefer \`clamp()\` over discrete Tailwind size jumps on hero headlines and section titles:
+
+\`\`\`css
+/* Hero h1 — fluid from 36px (mobile) to 72px (desktop) */
+.hero-title { font-size: clamp(2.25rem, 5vw + 1rem, 4.5rem); }
+
+/* Section h2 — fluid from 30px to 48px */
+.section-title { font-size: clamp(1.875rem, 3vw + 0.75rem, 3rem); }
+\`\`\`
+
+This eliminates jarring size jumps at breakpoints. The Tailwind class approach (\`text-4xl sm:text-5xl lg:text-6xl\`) is still acceptable but \`clamp()\` produces a more refined experience. Use \`clamp()\` for the top 2 heading levels; keep fixed sizes for h3, h4, and body text.
+
 #### Heading Hierarchy
 
 - **h1** (Hero only): \`text-4xl sm:text-5xl lg:text-6xl xl:text-7xl font-extrabold tracking-tight leading-[1.1]\`
@@ -184,6 +207,20 @@ text-7xl:  4.5rem   (72px) — hero headline (large desktop)
 | Tight | \`leading-[1.1]\` - \`leading-[1.2]\` | Hero headlines, large headings |
 | Normal | \`leading-[1.5]\` | Body text, descriptions |
 | Relaxed | \`leading-[1.75]\` | Long-form content, paragraphs in narrow containers |
+
+#### Paragraph Readability
+
+Apply \`max-w-prose\` (65ch / ~650px) to all paragraph and description text blocks for optimal line length. This prevents eye fatigue from lines that are too wide on large screens.
+
+\`\`\`html
+<!-- Section descriptions -->
+<p class="text-lg text-muted-foreground max-w-prose mx-auto">...</p>
+
+<!-- Card descriptions -->
+<p class="text-muted-foreground max-w-prose">...</p>
+\`\`\`
+
+Exception: hero subtitles may use \`max-w-2xl\` or \`max-w-3xl\` for visual balance.
 
 ### 2.3 Spacing & Layout
 
@@ -295,6 +332,25 @@ theme: {
   },
 }
 \`\`\`
+
+### 2.6 UX Writing & Microcopy
+
+#### Button Labels
+- Use specific, action-oriented labels — "Reservar mesa", "Ver menú", "Agendar cita" instead of generic "Enviar" or "Click aquí"
+- For CTAs, lead with the outcome: "Obtener presupuesto gratis" > "Enviar formulario"
+- Destructive actions must be explicit: "Eliminar cuenta" not "Aceptar"
+
+#### Copy Principles
+- **Say it once, say it well** — don't repeat the same value proposition across multiple sections with different words
+- Every heading must communicate a specific benefit, not just a category label ("Tu sonrisa merece lo mejor" > "Nuestros servicios")
+- Avoid corporate buzzwords without context: "innovador", "líder", "solución integral" need specifics to back them up
+- Empty states and loading messages should be specific: "Cargando el menú..." > generic spinner
+
+#### Content Tone by Section
+- **Hero**: Bold, confident, aspirational — one clear value proposition
+- **Features**: Benefit-first, concise — what the customer GETS, not what the business DOES
+- **Testimonials**: Authentic voice — short, specific praise beats long generic paragraphs
+- **CTA/Footer**: Urgent but not desperate — create clear next steps
 
 ---
 
@@ -2762,7 +2818,8 @@ Before finalizing your output, verify every item below. Do not submit code until
 - [ ] OpenGraph \`og:title\`, \`og:description\`, \`og:image\` tags present
 - [ ] Twitter card meta tags present
 - [ ] ALL \`<img>\` elements have descriptive \`alt\` text (not "image" or "photo")
-- [ ] Interactive elements (buttons, links) have visible focus styles
+- [ ] Interactive elements use \`:focus-visible\` (not \`:focus\`) for keyboard-only focus rings: \`outline: 2px solid var(--ring); outline-offset: 2px\`
+- [ ] Focus rings have minimum 3:1 contrast ratio against surrounding colors
 - [ ] ARIA labels on icon-only buttons and non-obvious interactive elements
 - [ ] Keyboard navigation works: Tab through all interactive elements
 - [ ] Single \`<h1>\` per page, proper heading nesting (h1 > h2 > h3, no skipped levels)
@@ -2784,6 +2841,14 @@ Before finalizing your output, verify every item below. Do not submit code until
 - [ ] Hero images use \`priority\` (Next.js) or are preloaded
 - [ ] No inline styles where Tailwind classes suffice
 - [ ] Heavy interactive components could be dynamically imported in production
+
+### AI Slop Test
+- [ ] Apply the "AI Slop Test": would someone immediately recognize this as AI-generated? If yes, redesign.
+- [ ] No identical card grids with uniform rounded corners and generic shadows — vary card sizes, layouts, or visual treatments
+- [ ] No gratuitous glassmorphism or decorative blur effects without purpose
+- [ ] No gradient text on metrics or stats — use solid colors for data readability
+- [ ] No generic motivational copy without substance — every sentence should convey specific value
+- [ ] Distinctive visual identity — the site should prompt "how was this made?" not "which AI made this?"
 
 ---
 

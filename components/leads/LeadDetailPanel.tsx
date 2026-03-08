@@ -6,8 +6,9 @@ import { ScoreBadge } from './ScoreBadge'
 import { StatusBadge, STATUS_LABELS } from './StatusBadge'
 import {
   ExternalLink, Phone, MapPin, Tag, Clock, RefreshCw,
-  MessageSquare, Globe, ChevronDown, ChevronUp, Loader2, Wand2
+  MessageSquare, Globe, ChevronDown, ChevronUp, Loader2, Wand2, Pencil,
 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
@@ -51,6 +52,7 @@ export function LeadDetailPanel({
   generatingSite,
   onOpenWhatsApp,
 }: LeadDetailPanelProps) {
+  const router = useRouter()
   const [notes, setNotes] = useState(lead.notes ?? '')
   const [savingNotes, setSavingNotes] = useState(false)
   const [showCriteria, setShowCriteria] = useState(false)
@@ -326,6 +328,18 @@ export function LeadDetailPanel({
               <ExternalLink className="h-3.5 w-3.5" />
               Ver sitio generado
             </a>
+          )}
+
+          {lead.generated_site_url && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full justify-start gap-2"
+              onClick={() => router.push(`/editor/${lead.id}`)}
+            >
+              <Pencil className="h-4 w-4" />
+              Editar sitio
+            </Button>
           )}
 
           <Button
