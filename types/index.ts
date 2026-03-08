@@ -45,6 +45,7 @@ export interface ScoreDetails {
   problems: string[]
   summary: string
   site_html?: string
+  site_html_original?: string
   site_slug?: string
 }
 

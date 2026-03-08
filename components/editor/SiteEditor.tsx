@@ -70,11 +70,12 @@ function parseHtmlDocument(rawHtml: string) {
   // ── Body ────────────────────────────────────────────────────────
   const bodyEl = doc.body
 
-  // Save body attributes (class, style, data-*, etc.)
-  const bodyAttrs: string[] = []
+  // Save body attributes (class, style, data-*, etc.) as a map
+  // to avoid string serialization issues with special characters in values
+  const bodyAttrsMap: Record<string, string> = {}
   for (let i = 0; i < bodyEl.attributes.length; i++) {
     const a = bodyEl.attributes[i]
-    bodyAttrs.push(`${a.name}="${a.value}"`)
+    bodyAttrsMap[a.name] = a.value
   }
 
   // Extract and remove scripts from body before GrapesJS parsing
@@ -97,7 +98,7 @@ function parseHtmlDocument(rawHtml: string) {
     tailwindCdnSrc,
     tailwindConfigCode,
     otherHeadScripts,
-    bodyAttrsStr: bodyAttrs.join(' '),
+    bodyAttrsMap,
     bodyScriptTags,
     bodyContent,
   }
@@ -112,7 +113,7 @@ export default function SiteEditor({
   const containerRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Editor | null>(null)
   const headContentRef = useRef('')
-  const bodyAttrsRef = useRef('')
+  const bodyAttrsRef = useRef<Record<string, string>>({})
   const bodyScriptsRef = useRef<string[]>([])
   const [editor, setEditor] = useState<Editor | null>(null)
   const [saving, setSaving] = useState(false)
@@ -136,7 +137,7 @@ export default function SiteEditor({
 
     // Persist for save reconstruction
     headContentRef.current = parsed.headInnerHTML
-    bodyAttrsRef.current = parsed.bodyAttrsStr
+    bodyAttrsRef.current = parsed.bodyAttrsMap
     bodyScriptsRef.current = parsed.bodyScriptTags
 
     // Extract external stylesheet URLs for canvas.styles (loads early)
@@ -144,12 +145,17 @@ export default function SiteEditor({
       .map((el) => el.getAttribute('href'))
       .filter(Boolean) as string[]
 
-    // Build frameContent: full <head> with Tailwind CDN + config + styles,
-    // empty body. document.write() executes scripts synchronously in order,
-    // so Tailwind CDN loads → config applies → CSS vars/animations ready.
+    // Build frameContent with head resources but NO <script> tags.
+    // External scripts in frameContent block the HTML parser (waiting for
+    // download), so <body> doesn't exist yet when GrapesJS calls renderBody()
+    // → null error. Tailwind CDN loads via canvas.scripts instead.
+    const headWithoutScripts = parsed.headInnerHTML.replace(
+      /<script[\s\S]*?<\/script>/gi,
+      ''
+    )
     const frameContent = `<!DOCTYPE html>
 <html lang="es">
-<head>${parsed.headInnerHTML}</head>
+<head>${headWithoutScripts}</head>
 <body></body>
 </html>`
 
@@ -211,8 +217,8 @@ export default function SiteEditor({
           }
         }
 
-        // Fallback: canvas.scripts doesn't support inline scripts,
-        // so re-inject Tailwind config if needed
+        // Inject Tailwind config (inline script). canvas.scripts loaded the
+        // CDN, so tailwind global is available. Config must come after CDN.
         if (canvasDoc && parsed.tailwindConfigCode) {
           const s = canvasDoc.createElement('script')
           s.textContent = parsed.tailwindConfigCode
@@ -240,17 +246,10 @@ export default function SiteEditor({
         }
 
         // Apply body attributes (class, style, etc.) to wrapper
-        if (parsed.bodyAttrsStr) {
+        if (Object.keys(parsed.bodyAttrsMap).length > 0) {
           const wrapper = ed.DomComponents.getWrapper()
           if (wrapper) {
-            const tmpDoc = new DOMParser().parseFromString(
-              `<body ${parsed.bodyAttrsStr}></body>`,
-              'text/html'
-            )
-            for (let i = 0; i < tmpDoc.body.attributes.length; i++) {
-              const attr = tmpDoc.body.attributes[i]
-              wrapper.addAttributes({ [attr.name]: attr.value })
-            }
+            wrapper.addAttributes(parsed.bodyAttrsMap)
           }
         }
 
@@ -282,13 +281,16 @@ export default function SiteEditor({
     const bodyInner = ed.getHtml()
     const editorCss = ed.getCss({ avoidProtected: true }) ?? ''
     const bodyScripts = bodyScriptsRef.current.join('\n')
+    const attrsStr = Object.entries(bodyAttrsRef.current)
+      .map(([k, v]) => `${k}="${v.replace(/"/g, '&quot;')}"`)
+      .join(' ')
     return `<!DOCTYPE html>
 <html lang="es">
 <head>
 ${headContentRef.current}
 ${editorCss ? `<style data-gjs-editor>\n${editorCss}\n</style>` : ''}
 </head>
-<body${bodyAttrsRef.current ? ' ' + bodyAttrsRef.current : ''}>
+<body${attrsStr ? ' ' + attrsStr : ''}>
 ${bodyInner}
 ${bodyScripts}
 </body>

@@ -45,7 +45,14 @@ export async function PUT(
     const stabilizedHtml = stabilizeGeneratedSiteHtml(rawHtml)
 
     const existingDetails = (lead.score_details as Record<string, unknown>) ?? {}
-    const updatedDetails = { ...existingDetails, site_html: stabilizedHtml }
+    const updatedDetails = {
+      ...existingDetails,
+      // Preserve original HTML on first edit so users can revert
+      ...(existingDetails.site_html_original
+        ? {}
+        : { site_html_original: existingDetails.site_html }),
+      site_html: stabilizedHtml,
+    }
 
     const { error: updateError } = await supabase
       .from('leads')
