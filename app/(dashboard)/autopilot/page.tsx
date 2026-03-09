@@ -18,6 +18,7 @@ import {
   Clock,
   RefreshCw,
   Phone,
+  X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -41,7 +42,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { usePipeline } from '@/hooks/use-pipeline'
+import type { RunState } from '@/hooks/use-pipeline'
 import { LeadCardModal } from '@/components/leads/LeadCardModal'
 import type { Lead, LeadActivity, WhatsAppAccount } from '@/types'
 import type { PipelineStage, PipelineLeadState, PipelineRun, PipelineLeadRow } from '@/types'
@@ -106,7 +109,7 @@ const STATUS_TO_STAGE_KEY: Record<string, PipelineStage> = {
 function stageIndex(stage: PipelineStage): number {
   const idx = STAGES.findIndex((s) => s.key === stage)
   if (stage === 'done') return STAGES.length
-  if (stage === 'processing') return -1 // handled specially
+  if (stage === 'processing') return -1
   return idx
 }
 
@@ -146,8 +149,36 @@ function LeadStatusBadge({ status }: { status: PipelineLeadState['status'] }) {
   return <Badge className={v.className}>{v.label}</Badge>
 }
 
+function RunStageDot({ stage }: { stage: PipelineStage }) {
+  const isActive = !['idle', 'done', 'error'].includes(stage)
+  const isDone = stage === 'done'
+  const isError = stage === 'error'
+  return (
+    <span
+      className={`inline-block h-2 w-2 rounded-full ${
+        isError
+          ? 'bg-red-500'
+          : isDone
+            ? 'bg-green-500'
+            : isActive
+              ? 'bg-blue-500 animate-pulse'
+              : 'bg-gray-400'
+      }`}
+    />
+  )
+}
+
 export default function AutopilotPage() {
-  const { state, run, cancel, retry, isRunning, reset } = usePipeline()
+  const {
+    runs,
+    run,
+    cancel,
+    retry,
+    removeRun,
+    isRunningForAccount,
+    hasAnyRunning,
+  } = usePipeline()
+
   const [niche, setNiche] = useState('')
   const [city, setCity] = useState('')
   const [maxResults, setMaxResults] = useState(20)
@@ -163,6 +194,7 @@ export default function AutopilotPage() {
   const [loadingLead, setLoadingLead] = useState<string | null>(null)
   const [checkingSiteModel, setCheckingSiteModel] = useState(false)
   const [siteHealth, setSiteHealth] = useState<SiteGeneratorHealthResponse | null>(null)
+  const [activeTab, setActiveTab] = useState<string>('')
 
   useEffect(() => {
     // Fetch user's WhatsApp accounts
@@ -200,6 +232,13 @@ export default function AutopilotPage() {
       .catch(() => setWhatsappAccounts([]))
   }, [])
 
+  // Auto-select first tab when runs appear
+  useEffect(() => {
+    if (runs.length > 0 && (!activeTab || !runs.some((r) => r.runId === activeTab))) {
+      setActiveTab(runs[0].runId)
+    }
+  }, [runs, activeTab])
+
   const handleRowClick = async (leadId: string) => {
     setLoadingLead(leadId)
     try {
@@ -219,6 +258,10 @@ export default function AutopilotPage() {
     }
   }
 
+  const selectedAccountRunning = selectedAccountId
+    ? isRunningForAccount(selectedAccountId)
+    : false
+
   const handleRun = async () => {
     if (!niche.trim() || !city.trim()) {
       toast.error('Completá el nicho y la ciudad')
@@ -229,17 +272,23 @@ export default function AutopilotPage() {
       return
     }
 
+    const accountLabel =
+      whatsappAccounts.find((a) => a.id === selectedAccountId)?.label ?? ''
+
     try {
-      await run({
-        niche: niche.trim(),
-        city: city.trim(),
-        maxResults,
-        skipAnalysis,
-        skipSiteGeneration: skipSites,
-        skipMessages,
-        skipSending,
-        whatsappAccountId: skipSending ? undefined : selectedAccountId,
-      })
+      await run(
+        {
+          niche: niche.trim(),
+          city: city.trim(),
+          maxResults,
+          skipAnalysis,
+          skipSiteGeneration: skipSites,
+          skipMessages,
+          skipSending,
+          whatsappAccountId: skipSending ? undefined : selectedAccountId,
+        },
+        accountLabel
+      )
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Error en el pipeline')
     }
@@ -274,20 +323,22 @@ export default function AutopilotPage() {
     }
   }
 
-  const currentStageIdx = stageIndex(state.stage)
-  const { progress } = state
-
   return (
     <div className="p-8">
       <div className="mb-8">
         <h1 className="text-2xl font-bold tracking-tight">Autopilot</h1>
         <p className="text-muted-foreground">
           Ejecutá el pipeline completo: buscar, analizar, generar sitios y enviar mensajes.
+          {hasAnyRunning && (
+            <span className="ml-2 text-blue-600 dark:text-blue-400">
+              ({runs.filter((r) => !['idle', 'done', 'error'].includes(r.stage)).length} en ejecución)
+            </span>
+          )}
         </p>
       </div>
 
       {/* Resuming state */}
-      {state.resuming && (
+      {runs.some((r) => r.resuming) && (
         <div className="mb-6 flex items-center gap-3 rounded-lg border border-blue-300 bg-blue-50 p-4 dark:border-blue-800 dark:bg-blue-900/20">
           <Loader2 className="h-5 w-5 shrink-0 animate-spin text-blue-600 dark:text-blue-400" />
           <div className="flex-1">
@@ -295,7 +346,7 @@ export default function AutopilotPage() {
               Recuperando progreso...
             </p>
             <p className="text-xs text-blue-700 dark:text-blue-300">
-              Se detectó un pipeline en ejecución. Reconectando.
+              Se detectaron pipelines en ejecución. Reconectando.
             </p>
           </div>
         </div>
@@ -352,9 +403,8 @@ export default function AutopilotPage() {
                   placeholder="ej. Dentistas"
                   value={niche}
                   onChange={(e) => setNiche(e.target.value)}
-                  disabled={isRunning}
                 />
-                <Select onValueChange={(v) => setNiche(v)} disabled={isRunning}>
+                <Select onValueChange={(v) => setNiche(v)}>
                   <SelectTrigger className="w-28 shrink-0">
                     <SelectValue placeholder="Lista" />
                   </SelectTrigger>
@@ -375,7 +425,6 @@ export default function AutopilotPage() {
                 placeholder="ej. Palermo, Buenos Aires"
                 value={city}
                 onChange={(e) => setCity(e.target.value)}
-                disabled={isRunning}
               />
             </div>
 
@@ -384,7 +433,6 @@ export default function AutopilotPage() {
               <Select
                 value={String(maxResults)}
                 onValueChange={(v) => setMaxResults(Number(v))}
-                disabled={isRunning}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -405,35 +453,40 @@ export default function AutopilotPage() {
                 <Select
                   value={selectedAccountId}
                   onValueChange={setSelectedAccountId}
-                  disabled={isRunning}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Seleccionar número" />
                   </SelectTrigger>
                   <SelectContent>
-                    {whatsappAccounts.map((account) => (
-                      <SelectItem
-                        key={account.id}
-                        value={account.id}
-                        disabled={account.checking || account.connected === false}
-                      >
-                        <span className="flex items-center gap-2">
-                          <span
-                            className={`inline-block h-2 w-2 rounded-full ${
-                              account.checking
-                                ? 'bg-gray-400 animate-pulse'
-                                : account.connected
-                                  ? 'bg-green-500'
-                                  : 'bg-red-400'
-                            }`}
-                          />
-                          {account.label}
-                          {account.phone_number ? ` (+${account.phone_number.slice(0, 5)}...)` : ''}
-                          {account.checking ? ' (verificando...)' : ''}
-                          {!account.checking && account.connected === false ? ' (desconectado)' : ''}
-                        </span>
-                      </SelectItem>
-                    ))}
+                    {whatsappAccounts.map((account) => {
+                      const accountRunning = isRunningForAccount(account.id)
+                      return (
+                        <SelectItem
+                          key={account.id}
+                          value={account.id}
+                          disabled={account.checking || account.connected === false}
+                        >
+                          <span className="flex items-center gap-2">
+                            <span
+                              className={`inline-block h-2 w-2 rounded-full ${
+                                account.checking
+                                  ? 'bg-gray-400 animate-pulse'
+                                  : account.connected
+                                    ? accountRunning
+                                      ? 'bg-blue-500 animate-pulse'
+                                      : 'bg-green-500'
+                                    : 'bg-red-400'
+                              }`}
+                            />
+                            {account.label}
+                            {account.phone_number ? ` (+${account.phone_number.slice(0, 5)}...)` : ''}
+                            {account.checking ? ' (verificando...)' : ''}
+                            {!account.checking && account.connected === false ? ' (desconectado)' : ''}
+                            {accountRunning ? ' (en ejecución)' : ''}
+                          </span>
+                        </SelectItem>
+                      )
+                    })}
                     {whatsappAccounts.length === 0 && (
                       <SelectItem value="_none" disabled>
                         No hay números configurados
@@ -445,40 +498,14 @@ export default function AutopilotPage() {
             )}
 
             <div className="flex items-end">
-              {isRunning ? (
-                <Button variant="destructive" onClick={cancel} className="w-full gap-2">
-                  <XCircle className="h-4 w-4" />
-                  Cancelar
-                </Button>
-              ) : state.stage === 'error' ? (
-                <div className="flex w-full gap-2">
-                  <Button
-                    onClick={async () => {
-                      try {
-                        await retry(state.runId!)
-                      } catch (err) {
-                        toast.error(err instanceof Error ? err.message : 'Error al reintentar')
-                      }
-                    }}
-                    className="flex-1 gap-2"
-                  >
-                    <RefreshCw className="h-4 w-4" />
-                    Reintentar
-                  </Button>
-                  <Button onClick={reset} variant="outline" className="flex-1 gap-2">
-                    Nueva ejecución
-                  </Button>
-                </div>
-              ) : state.stage === 'done' ? (
-                <Button onClick={reset} variant="outline" className="w-full gap-2">
-                  Nueva ejecución
-                </Button>
-              ) : (
-                <Button onClick={handleRun} className="w-full gap-2">
-                  <Rocket className="h-4 w-4" />
-                  Ejecutar pipeline
-                </Button>
-              )}
+              <Button
+                onClick={handleRun}
+                className="w-full gap-2"
+                disabled={selectedAccountRunning}
+              >
+                <Rocket className="h-4 w-4" />
+                {selectedAccountRunning ? 'Cuenta en ejecución' : 'Ejecutar pipeline'}
+              </Button>
             </div>
           </div>
 
@@ -488,7 +515,6 @@ export default function AutopilotPage() {
               <Checkbox
                 checked={skipAnalysis}
                 onCheckedChange={(v) => setSkipAnalysis(!!v)}
-                disabled={isRunning}
               />
               Omitir análisis
             </label>
@@ -496,7 +522,6 @@ export default function AutopilotPage() {
               <Checkbox
                 checked={skipSites}
                 onCheckedChange={(v) => setSkipSites(!!v)}
-                disabled={isRunning}
               />
               Omitir generación de sitios
             </label>
@@ -504,7 +529,6 @@ export default function AutopilotPage() {
               <Checkbox
                 checked={skipMessages}
                 onCheckedChange={(v) => setSkipMessages(!!v)}
-                disabled={isRunning}
               />
               Omitir generación de mensajes
             </label>
@@ -512,7 +536,6 @@ export default function AutopilotPage() {
               <Checkbox
                 checked={skipSending}
                 onCheckedChange={(v) => setSkipSending(!!v)}
-                disabled={isRunning}
               />
               Omitir envío WhatsApp
             </label>
@@ -582,204 +605,46 @@ export default function AutopilotPage() {
         </CardContent>
       </Card>
 
-      {/* Progress Stepper */}
-      {state.stage !== 'idle' && (
+      {/* Active Runs — Tabs */}
+      {runs.length > 0 && (
         <Card className="mb-6">
           <CardHeader>
-            <CardTitle className="text-base">Progreso</CardTitle>
+            <CardTitle className="text-base">
+              Ejecuciones activas ({runs.length})
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="flex items-center justify-between">
-              {STAGES.map((s, i) => {
-                const Icon = s.icon
-                let isActive: boolean
-                let isComplete: boolean
-                const isError = state.stage === 'error' && currentStageIdx === i
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <TabsList className="mb-4 w-full flex-wrap justify-start">
+                {runs.map((r) => (
+                  <TabsTrigger key={r.runId} value={r.runId} className="gap-2">
+                    <RunStageDot stage={r.stage} />
+                    <span className="max-w-[160px] truncate">
+                      {r.niche} - {r.accountLabel || r.city}
+                    </span>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
 
-                if (state.stage === 'processing') {
-                  // During parallel processing, compute per-stage status from lead states
-                  const nonTerminal = state.leads.filter(
-                    (l) => l.status !== 'skipped' && l.status !== 'error'
-                  )
-                  // Search & import are always complete during processing
-                  if (s.key === 'searching' || s.key === 'importing') {
-                    isActive = false
-                    isComplete = true
-                  } else {
-                    const activeInStage = nonTerminal.some(
-                      (l) => STATUS_TO_STAGE_KEY[l.status] === s.key &&
-                        ACTIVE_STATUSES.includes(l.status)
-                    )
-                    const completedStatuses = nonTerminal.filter(
-                      (l) => {
-                        const stageKey = STATUS_TO_STAGE_KEY[l.status]
-                        if (!stageKey) return false
-                        const stageIdx = STAGES.findIndex((st) => st.key === stageKey)
-                        const thisIdx = STAGES.findIndex((st) => st.key === s.key)
-                        return stageIdx > thisIdx
+              {runs.map((r) => (
+                <TabsContent key={r.runId} value={r.runId}>
+                  <RunProgressPanel
+                    runState={r}
+                    onCancel={() => cancel(r.runId)}
+                    onRetry={async () => {
+                      try {
+                        await retry(r.runId)
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : 'Error al reintentar')
                       }
-                    )
-                    const doneStatuses = nonTerminal.filter(
-                      (l) => {
-                        const stageKey = STATUS_TO_STAGE_KEY[l.status]
-                        return stageKey === s.key && !ACTIVE_STATUSES.includes(l.status)
-                      }
-                    )
-                    isActive = activeInStage
-                    isComplete = !isActive && nonTerminal.length > 0 &&
-                      (completedStatuses.length + doneStatuses.length) === nonTerminal.length
-                  }
-                } else {
-                  isActive = s.key === state.stage
-                  isComplete = currentStageIdx > i
-                }
-
-                return (
-                  <div key={s.key} className="flex flex-1 flex-col items-center gap-1.5">
-                    <div
-                      className={`flex h-10 w-10 items-center justify-center rounded-full border-2 transition-all ${
-                        isError
-                          ? 'border-red-500 bg-red-100 text-red-600 dark:bg-red-900/30'
-                          : isActive
-                            ? 'border-primary bg-primary text-primary-foreground'
-                            : isComplete
-                              ? 'border-green-500 bg-green-100 text-green-600 dark:bg-green-900/30'
-                              : 'border-muted bg-muted text-muted-foreground'
-                      }`}
-                    >
-                      {isActive && !isError ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : isComplete ? (
-                        <CheckCircle2 className="h-4 w-4" />
-                      ) : isError ? (
-                        <XCircle className="h-4 w-4" />
-                      ) : (
-                        <Icon className="h-4 w-4" />
-                      )}
-                    </div>
-                    <span className="text-xs font-medium">{s.label}</span>
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* Contadores */}
-            <div className="mt-6 grid grid-cols-3 gap-4 sm:grid-cols-6">
-              <Stat label="Importados" value={progress.imported || state.leads.length} />
-              <Stat label="Analizados" value={progress.analyzed} />
-              <Stat label="Sitios" value={progress.sitesGenerated} />
-              <Stat label="Mensajes" value={progress.messagesGenerated} />
-              <Stat label="Enviados" value={progress.sent} />
-              <Stat label="Errores" value={progress.errors} error />
-            </div>
-
-            {state.runErrors.length > 0 && (
-              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-900/20">
-                <p className="mb-2 text-xs font-semibold text-red-700 dark:text-red-300">
-                  Logs de errores ({state.runErrors.length})
-                </p>
-                <div className="space-y-1">
-                  {state.runErrors
-                    .slice(-8)
-                    .reverse()
-                    .map((err, idx) => (
-                      <p key={`run-error-${idx}`} className="text-xs text-red-700 dark:text-red-300">
-                        [{err.stage ?? 'pipeline'}/{err.step}]
-                        {err.businessName ? ` ${err.businessName}:` : ''} {err.error}
-                      </p>
-                    ))}
-                </div>
-              </div>
-            )}
-
-            {state.error && (
-              <div className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
-                {state.error}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Tabla de leads */}
-      {state.leads.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Leads ({state.leads.length})</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="max-h-[500px] overflow-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Negocio</TableHead>
-                    <TableHead>Teléfono</TableHead>
-                    <TableHead className="text-center">Score</TableHead>
-                    <TableHead>Sitio</TableHead>
-                    <TableHead>Estado</TableHead>
-                    <TableHead>Error</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {state.leads.map((lead, i) => (
-                    <TableRow
-                      key={lead.leadId || i}
-                      className="cursor-pointer hover:bg-muted/50"
-                      onClick={() => lead.leadId && handleRowClick(lead.leadId)}
-                    >
-                      <TableCell className="font-medium">
-                        <span className="flex items-center gap-2">
-                          {lead.businessName}
-                          {loadingLead === lead.leadId && (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-                          )}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-sm">{lead.phone || '—'}</TableCell>
-                      <TableCell className="text-center">
-                        {lead.score ? (
-                          <Badge variant={lead.score < 4 ? 'destructive' : 'secondary'}>
-                            {lead.score}/10
-                          </Badge>
-                        ) : (
-                          '—'
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {lead.siteUrl ? (
-                          <a
-                            href={lead.siteUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sm text-primary hover:underline"
-                          >
-                            Ver sitio
-                          </a>
-                        ) : lead.status === 'skipped' ? (
-                          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                            <SkipForward className="h-3 w-3" />
-                            Omitido
-                          </span>
-                        ) : (
-                          '—'
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <LeadStatusBadge status={lead.status} />
-                          {ACTIVE_STATUSES.includes(lead.status) && lead.updatedAt && (
-                            <ElapsedTimer since={lead.updatedAt} />
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="max-w-[200px] truncate text-xs text-red-500">
-                        {lead.error || ''}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                    }}
+                    onClose={() => removeRun(r.runId)}
+                    onRowClick={handleRowClick}
+                    loadingLead={loadingLead}
+                  />
+                </TabsContent>
+              ))}
+            </Tabs>
           </CardContent>
         </Card>
       )}
@@ -799,8 +664,7 @@ export default function AutopilotPage() {
 
       {/* Historial */}
       <PipelineHistory
-        activeRunId={state.runId}
-        isRunning={isRunning}
+        activeRunIds={runs.map((r) => r.runId)}
         onRerun={(pastRun) => {
           const cfg = (pastRun.config ?? {}) as Record<string, unknown>
           setNiche(pastRun.niche)
@@ -810,23 +674,273 @@ export default function AutopilotPage() {
           setSkipSites(!!cfg.skipSiteGeneration)
           setSkipMessages(!!cfg.skipMessages)
           setSkipSending(!!cfg.skipSending)
-          run({
-            niche: pastRun.niche,
-            city: pastRun.city,
-            maxResults: Number(cfg.maxResults) || 20,
-            skipAnalysis: !!cfg.skipAnalysis,
-            skipSiteGeneration: !!cfg.skipSiteGeneration,
-            skipMessages: !!cfg.skipMessages,
-            skipSending: !!cfg.skipSending,
-            whatsappAccountId: selectedAccountId || undefined,
-          }).catch((err) => {
+
+          const accountId =
+            pastRun.whatsapp_account_id ??
+            (cfg.whatsappAccountId as string | undefined) ??
+            selectedAccountId
+          const accountLabel =
+            whatsappAccounts.find((a) => a.id === accountId)?.label ?? ''
+
+          run(
+            {
+              niche: pastRun.niche,
+              city: pastRun.city,
+              maxResults: Number(cfg.maxResults) || 20,
+              skipAnalysis: !!cfg.skipAnalysis,
+              skipSiteGeneration: !!cfg.skipSiteGeneration,
+              skipMessages: !!cfg.skipMessages,
+              skipSending: !!cfg.skipSending,
+              whatsappAccountId: accountId || undefined,
+            },
+            accountLabel
+          ).catch((err) => {
             toast.error(err instanceof Error ? err.message : 'Error en el pipeline')
           })
         }}
+        isRunningForAccount={isRunningForAccount}
       />
     </div>
   )
 }
+
+/* ───────────── RunProgressPanel ───────────── */
+
+function RunProgressPanel({
+  runState,
+  onCancel,
+  onRetry,
+  onClose,
+  onRowClick,
+  loadingLead,
+}: {
+  runState: RunState
+  onCancel: () => void
+  onRetry: () => void
+  onClose: () => void
+  onRowClick: (leadId: string) => void
+  loadingLead: string | null
+}) {
+  const { stage, leads, runErrors, progress, error } = runState
+  const currentStageIdx = stageIndex(stage)
+  const isActive = !['idle', 'done', 'error'].includes(stage)
+
+  return (
+    <div className="space-y-4">
+      {/* Actions bar */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Phone className="h-4 w-4" />
+          {runState.accountLabel || 'Sin cuenta WA'}
+          <span className="mx-1">·</span>
+          {runState.niche} en {runState.city}
+        </div>
+        <div className="flex gap-2">
+          {isActive && (
+            <Button variant="destructive" size="sm" onClick={onCancel} className="gap-1.5">
+              <XCircle className="h-3.5 w-3.5" />
+              Cancelar
+            </Button>
+          )}
+          {stage === 'error' && (
+            <Button size="sm" onClick={onRetry} className="gap-1.5">
+              <RefreshCw className="h-3.5 w-3.5" />
+              Reintentar
+            </Button>
+          )}
+          {!isActive && (
+            <Button variant="outline" size="sm" onClick={onClose} className="gap-1.5">
+              <X className="h-3.5 w-3.5" />
+              Cerrar
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Stepper */}
+      <div className="flex items-center justify-between">
+        {STAGES.map((s, i) => {
+          const Icon = s.icon
+          let isStageActive: boolean
+          let isComplete: boolean
+          const isError = stage === 'error' && currentStageIdx === i
+
+          if (stage === 'processing') {
+            const nonTerminal = leads.filter(
+              (l) => l.status !== 'skipped' && l.status !== 'error'
+            )
+            if (s.key === 'searching' || s.key === 'importing') {
+              isStageActive = false
+              isComplete = true
+            } else {
+              const activeInStage = nonTerminal.some(
+                (l) => STATUS_TO_STAGE_KEY[l.status] === s.key &&
+                  ACTIVE_STATUSES.includes(l.status)
+              )
+              const completedStatuses = nonTerminal.filter((l) => {
+                const stageKey = STATUS_TO_STAGE_KEY[l.status]
+                if (!stageKey) return false
+                const stageIdx = STAGES.findIndex((st) => st.key === stageKey)
+                const thisIdx = STAGES.findIndex((st) => st.key === s.key)
+                return stageIdx > thisIdx
+              })
+              const doneStatuses = nonTerminal.filter((l) => {
+                const stageKey = STATUS_TO_STAGE_KEY[l.status]
+                return stageKey === s.key && !ACTIVE_STATUSES.includes(l.status)
+              })
+              isStageActive = activeInStage
+              isComplete = !isStageActive && nonTerminal.length > 0 &&
+                (completedStatuses.length + doneStatuses.length) === nonTerminal.length
+            }
+          } else {
+            isStageActive = s.key === stage
+            isComplete = currentStageIdx > i
+          }
+
+          return (
+            <div key={s.key} className="flex flex-1 flex-col items-center gap-1.5">
+              <div
+                className={`flex h-10 w-10 items-center justify-center rounded-full border-2 transition-all ${
+                  isError
+                    ? 'border-red-500 bg-red-100 text-red-600 dark:bg-red-900/30'
+                    : isStageActive
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : isComplete
+                        ? 'border-green-500 bg-green-100 text-green-600 dark:bg-green-900/30'
+                        : 'border-muted bg-muted text-muted-foreground'
+                }`}
+              >
+                {isStageActive && !isError ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : isComplete ? (
+                  <CheckCircle2 className="h-4 w-4" />
+                ) : isError ? (
+                  <XCircle className="h-4 w-4" />
+                ) : (
+                  <Icon className="h-4 w-4" />
+                )}
+              </div>
+              <span className="text-xs font-medium">{s.label}</span>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Contadores */}
+      <div className="grid grid-cols-3 gap-4 sm:grid-cols-6">
+        <Stat label="Importados" value={progress.imported || leads.length} />
+        <Stat label="Analizados" value={progress.analyzed} />
+        <Stat label="Sitios" value={progress.sitesGenerated} />
+        <Stat label="Mensajes" value={progress.messagesGenerated} />
+        <Stat label="Enviados" value={progress.sent} />
+        <Stat label="Errores" value={progress.errors} error />
+      </div>
+
+      {runErrors.length > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-900/20">
+          <p className="mb-2 text-xs font-semibold text-red-700 dark:text-red-300">
+            Logs de errores ({runErrors.length})
+          </p>
+          <div className="space-y-1">
+            {runErrors
+              .slice(-8)
+              .reverse()
+              .map((err, idx) => (
+                <p key={`run-error-${idx}`} className="text-xs text-red-700 dark:text-red-300">
+                  [{err.stage ?? 'pipeline'}/{err.step}]
+                  {err.businessName ? ` ${err.businessName}:` : ''} {err.error}
+                </p>
+              ))}
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
+          {error}
+        </div>
+      )}
+
+      {/* Tabla de leads */}
+      {leads.length > 0 && (
+        <div className="max-h-[500px] overflow-auto rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Negocio</TableHead>
+                <TableHead>Teléfono</TableHead>
+                <TableHead className="text-center">Score</TableHead>
+                <TableHead>Sitio</TableHead>
+                <TableHead>Estado</TableHead>
+                <TableHead>Error</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {leads.map((lead, i) => (
+                <TableRow
+                  key={lead.leadId || i}
+                  className="cursor-pointer hover:bg-muted/50"
+                  onClick={() => lead.leadId && onRowClick(lead.leadId)}
+                >
+                  <TableCell className="font-medium">
+                    <span className="flex items-center gap-2">
+                      {lead.businessName}
+                      {loadingLead === lead.leadId && (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                      )}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-sm">{lead.phone || '—'}</TableCell>
+                  <TableCell className="text-center">
+                    {lead.score ? (
+                      <Badge variant={lead.score < 4 ? 'destructive' : 'secondary'}>
+                        {lead.score}/10
+                      </Badge>
+                    ) : (
+                      '—'
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {lead.siteUrl ? (
+                      <a
+                        href={lead.siteUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-primary hover:underline"
+                      >
+                        Ver sitio
+                      </a>
+                    ) : lead.status === 'skipped' ? (
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <SkipForward className="h-3 w-3" />
+                        Omitido
+                      </span>
+                    ) : (
+                      '—'
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <LeadStatusBadge status={lead.status} />
+                      {ACTIVE_STATUSES.includes(lead.status) && lead.updatedAt && (
+                        <ElapsedTimer since={lead.updatedAt} />
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="max-w-[200px] truncate text-xs text-red-500">
+                    {lead.error || ''}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ───────────── Helpers ───────────── */
 
 function Stat({ label, value, error }: { label: string; value: number; error?: boolean }) {
   return (
@@ -880,14 +994,16 @@ function RunStatusBadge({ status }: { status: PipelineRun['status'] }) {
   return <Badge className={v.className}>{v.label}</Badge>
 }
 
+/* ───────────── PipelineHistory ───────────── */
+
 function PipelineHistory({
-  activeRunId,
+  activeRunIds,
   onRerun,
-  isRunning,
+  isRunningForAccount,
 }: {
-  activeRunId: string | null
+  activeRunIds: string[]
   onRerun: (run: PipelineRun) => void
-  isRunning: boolean
+  isRunningForAccount: (accountId: string) => boolean
 }) {
   const [runs, setRuns] = useState<PipelineRun[]>([])
   const [expandedId, setExpandedId] = useState<string | null>(null)
@@ -907,7 +1023,7 @@ function PipelineHistory({
   }, [])
 
   const pastRuns = runs.filter(
-    (r) => r.id !== activeRunId && r.status !== 'running'
+    (r) => !activeRunIds.includes(r.id) && r.status !== 'running'
   )
 
   const toggleExpand = async (runId: string) => {
@@ -965,6 +1081,9 @@ function PipelineHistory({
                 const leads = leadsCache[run.id]
                 const runErrors = Array.isArray(run.errors) ? run.errors : []
                 const endTime = run.completed_at || run.updated_at
+                const accountBusy = run.whatsapp_account_id
+                  ? isRunningForAccount(run.whatsapp_account_id)
+                  : false
                 return (
                   <React.Fragment key={run.id}>
                     <TableRow
@@ -996,8 +1115,8 @@ function PipelineHistory({
                           variant="ghost"
                           size="sm"
                           className="gap-1.5"
-                          disabled={isRunning}
-                          title={isRunning ? 'Esperá a que termine la ejecución actual' : 'Re-ejecutar con la misma configuración'}
+                          disabled={accountBusy}
+                          title={accountBusy ? 'Esta cuenta WA ya tiene un pipeline activo' : 'Re-ejecutar con la misma configuración'}
                           onClick={(e) => {
                             e.stopPropagation()
                             onRerun(run)

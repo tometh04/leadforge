@@ -101,6 +101,7 @@ export interface PipelineRun {
   }>
   completed_at: string | null
   updated_at: string
+  whatsapp_account_id?: string | null
 }
 
 export type PipelineStage =

@@ -16,8 +16,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'niche y city son requeridos' }, { status: 400 })
     }
 
-    // Create run in DB (uses cookie-based client since we're still in request context)
     const supabase = await createClient()
+
+    // Guard: only one active run per WhatsApp account
+    if (config.whatsappAccountId) {
+      const { data: existing } = await supabase
+        .from('pipeline_runs')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('whatsapp_account_id', config.whatsappAccountId)
+        .eq('status', 'running')
+        .limit(1)
+
+      if (existing && existing.length > 0) {
+        return NextResponse.json(
+          { error: 'Ya hay un pipeline en ejecución para este número de WhatsApp.' },
+          { status: 409 }
+        )
+      }
+    }
+
+    // Create run in DB (uses cookie-based client since we're still in request context)
     const { data: run, error } = await supabase
       .from('pipeline_runs')
       .insert({
